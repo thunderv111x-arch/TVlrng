@@ -4,7 +4,30 @@
    not in-game Valorant skins. No Riot IP is reproduced.
    ============================================================ */
 
-// ---- Rarity weights for the case-opening gacha ----
+/* ============================================================
+   League categories — used to classify whatever tournament name
+   the API returns, so the user can filter by league themselves
+   instead of the site hard-locking to one region.
+   Order matters: first matching test wins. 'other' must stay last.
+   ============================================================ */
+const LEAGUE_CATEGORIES = [
+  { id: 'vct_intl',      label: 'VCT International',    test: n => /champions|masters|kickoff/i.test(n) },
+  { id: 'vct_pacific',   label: 'VCT Pacific',           test: n => /pacific/i.test(n) },
+  { id: 'vct_americas',  label: 'VCT Americas',          test: n => /americas/i.test(n) },
+  { id: 'vct_emea',      label: 'VCT EMEA',              test: n => /emea/i.test(n) },
+  { id: 'vct_china',     label: 'VCT China',             test: n => /china/i.test(n) },
+  { id: 'challengers',   label: 'VCT Challengers',       test: n => /challenger/i.test(n) },
+  { id: 'game_changers', label: 'VCT Game Changers',     test: n => /game changers/i.test(n) },
+  { id: 'other',         label: 'ลีก/ทัวร์นาเมนต์อื่นๆ', test: () => true },
+];
+
+function classifyTournament(name) {
+  const n = name || '';
+  const found = LEAGUE_CATEGORIES.find(cat => cat.test(n));
+  return found ? found.id : 'other';
+}
+
+
 const RARITY = {
   common:    { label: 'COMMON',    weight: 55, color: '#8A94A3' },
   rare:      { label: 'RARE',      weight: 28, color: '#4DE8FF' },
@@ -38,7 +61,10 @@ const FRAME_CATALOG = [
 ];
 
 // ---- Full-site decoration themes (recolor CSS variables) ----
+// ระดับความหายาก (rarity) คือ "ราคา" ของธีม เพราะทุกกล่องราคาเท่ากัน (GACHA_COST)
+// แต่ common สุ่มติดง่ายสุด ส่วน legendary สุ่มติดยากสุด (โอกาสอิงจาก RARITY.weight ด้านบน)
 const THEME_CATALOG = [
+  // ---- ของเดิม: โทน HUD ยุทธวิธี ----
   { id: 'theme_tactical', name: 'Tactical (ค่าเริ่มต้น)', rarity: 'common',
     vars: { '--accent': '#FF3B4E', '--accent-2': '#4DE8FF', '--bg': '#0B0E12', '--bg-panel': '#12161C' } },
   { id: 'theme_frost',    name: 'Frost Line', rarity: 'common',
@@ -49,6 +75,32 @@ const THEME_CATALOG = [
     vars: { '--accent': '#B980FF', '--accent-2': '#4DE8FF', '--bg': '#0D0B14', '--bg-panel': '#16131F' } },
   { id: 'theme_radiant',  name: 'Radiant Gold', rarity: 'legendary',
     vars: { '--accent': '#E8B93B', '--accent-2': '#FF3B4E', '--bg': '#0F0D08', '--bg-panel': '#1A1610' } },
+
+  // ---- ใหม่: โทนน่ารักพาสเทล ----
+  { id: 'theme_sakura',       name: 'Sakura Petal', rarity: 'common',
+    vars: { '--accent': '#FF8FB1', '--accent-2': '#FFC1D9', '--bg': '#160F13', '--bg-panel': '#1F151B' } },
+  { id: 'theme_mint',         name: 'Mint Cream', rarity: 'common',
+    vars: { '--accent': '#7FE8C4', '--accent-2': '#B6F5DD', '--bg': '#0C1614', '--bg-panel': '#12201C' } },
+  { id: 'theme_lemonade',     name: 'Lemon Soda', rarity: 'common',
+    vars: { '--accent': '#FFDD6B', '--accent-2': '#FFF0B3', '--bg': '#151306', '--bg-panel': '#201C0C' } },
+  { id: 'theme_cottoncandy',  name: 'Cotton Candy', rarity: 'rare',
+    vars: { '--accent': '#FF9EDB', '--accent-2': '#9ED8FF', '--bg': '#130E17', '--bg-panel': '#1D1522' } },
+  { id: 'theme_lavender',     name: 'Lavender Dream', rarity: 'rare',
+    vars: { '--accent': '#C6A6FF', '--accent-2': '#A6C4FF', '--bg': '#100D18', '--bg-panel': '#191423' } },
+  { id: 'theme_peach',        name: 'Peach Soda', rarity: 'rare',
+    vars: { '--accent': '#FFB08A', '--accent-2': '#FFD6A8', '--bg': '#160F0A', '--bg-panel': '#211611' } },
+  { id: 'theme_skyberry',     name: 'Sky Berry', rarity: 'rare',
+    vars: { '--accent': '#8FD3FF', '--accent-2': '#FFA6D6', '--bg': '#0B1218', '--bg-panel': '#111C24' } },
+  { id: 'theme_bubblegum',    name: 'Bubblegum Pop', rarity: 'epic',
+    vars: { '--accent': '#FF5CC8', '--accent-2': '#7A5CFF', '--bg': '#130A17', '--bg-panel': '#1E1024' } },
+  { id: 'theme_strawberry',   name: 'Strawberry Milk', rarity: 'epic',
+    vars: { '--accent': '#FF6F91', '--accent-2': '#FFE3EC', '--bg': '#170A10', '--bg-panel': '#221019' } },
+  { id: 'theme_starlight',    name: 'Starlight Pastel', rarity: 'epic',
+    vars: { '--accent': '#A8C4FF', '--accent-2': '#FFD6F5', '--bg': '#0A0C18', '--bg-panel': '#131526' } },
+  { id: 'theme_unicorn',      name: 'Unicorn Dream', rarity: 'legendary',
+    vars: { '--accent': '#FF9AD6', '--accent-2': '#9AD6FF', '--bg': '#12081A', '--bg-panel': '#1D0F2A' } },
+  { id: 'theme_sakuragold',   name: 'Sakura Gold', rarity: 'legendary',
+    vars: { '--accent': '#FFC1D9', '--accent-2': '#E8B93B', '--bg': '#170F10', '--bg-panel': '#241A19' } },
 ];
 
 // ---- Offline fallback matches (used only if the live vlr.gg API is unreachable) ----
