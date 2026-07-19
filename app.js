@@ -15,6 +15,17 @@ const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.goo
 const API_BASE = 'https://vlr.orlandomm.net/api/v1';
 const FETCH_TIMEOUT_MS = 6000;
 
+// เอาแค่ทัวร์นาเมนต์ที่ชื่อมีคำเหล่านี้ครบทุกคำ (ไม่สนตัวพิมพ์เล็ก/ใหญ่)
+// ตอนนี้ตั้งไว้ให้เอาเฉพาะ VCT Pacific เท่านั้น — ถ้าอยากดูลีกอื่นด้วย
+// แก้ array นี้ เช่น ['VCT'] จะได้ VCT ทุกภูมิภาค หรือ [] จะได้ทุกแมตช์
+const TOURNAMENT_FILTER_KEYWORDS = ['VCT', 'Pacific'];
+
+function matchesTournamentFilter(tournamentName) {
+  if (!TOURNAMENT_FILTER_KEYWORDS.length) return true;
+  const name = (tournamentName || '').toLowerCase();
+  return TOURNAMENT_FILTER_KEYWORDS.every(kw => name.includes(kw.toLowerCase()));
+}
+
 const state = {
   user: null,        // { sub, name, picture, email }
   data: null,        // per-user save data (points, inventory, predictions, equipped)
@@ -122,6 +133,8 @@ function normalizeMatch(m) {
   return {
     team1: t1.name || 'TBD',
     team2: t2.name || 'TBD',
+    team1_logo: t1.logo || PLACEHOLDER_LOGO,
+    team2_logo: t2.logo || PLACEHOLDER_LOGO,
     match_event: m.tournament || '',
     match_series: m.event || '',
     time_until_match: m.in ? `เริ่มใน ${m.in}` : (m.status || ''),
@@ -135,6 +148,8 @@ function normalizeResult(r) {
   return {
     team1: t1.name || 'TBD',
     team2: t2.name || 'TBD',
+    team1_logo: t1.logo || PLACEHOLDER_LOGO,
+    team2_logo: t2.logo || PLACEHOLDER_LOGO,
     score1: t1.score,
     score2: t2.score,
     match_event: r.tournament || '',
@@ -150,11 +165,13 @@ async function loadMatches() {
       fetchWithTimeout(`${API_BASE}/matches`, FETCH_TIMEOUT_MS),
       fetchWithTimeout(`${API_BASE}/results`, FETCH_TIMEOUT_MS),
     ]);
-    const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming');
+    const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming' && matchesTournamentFilter(m.tournament));
     state.upcoming = rawUpcoming.map(normalizeMatch);
-    state.results = (resultsRes?.data || []).map(normalizeResult);
+    state.results = (resultsRes?.data || [])
+      .filter(r => matchesTournamentFilter(r.tournament))
+      .map(normalizeResult);
     state.usingFallback = false;
-    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
+    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • แสดงเฉพาะ VCT Pacific • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
   } catch (e) {
     console.warn('ดึงข้อมูลจาก vlr.gg ไม่สำเร็จ ใช้ข้อมูลตัวอย่างแทน', e);
     state.upcoming = FALLBACK_UPCOMING;
@@ -189,13 +206,16 @@ function resolvePendingPredictions() {
     state.data.stats.total += 1;
     if (pred.correct) {
       state.data.stats.correct += 1;
-      state.data.points += 20;
+      state.data.points += WIN_REWARD;
     } else {
-      state.data.points += 3; // participation points
+      state.data.points += LOSE_REWARD;
     }
     changed = true;
   }
-  if (changed) persist();
+  if (changed) {
+    persist();
+    renderTopbar();
+  }
 }
 
 /* ---------------- predicting ---------------- */
@@ -203,9 +223,12 @@ function resolvePendingPredictions() {
 function makePrediction(matchKey, pick, team1, team2, event) {
   if (!state.user) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะทายผลได้'); return; }
   if (state.data.predictions[matchKey]) return; // already predicted
-  state.data.predictions[matchKey] = { pick, team1, team2, event, resolved: false, correct: null };
+  if (state.data.points < BET_COST) { alert(`แต้มไม่พอสำหรับเดิมพัน ต้องมีอย่างน้อย ${BET_COST} แต้ม (มีอยู่ ${state.data.points})`); return; }
+  state.data.points -= BET_COST;
+  state.data.predictions[matchKey] = { pick, team1, team2, event, bet: BET_COST, resolved: false, correct: null };
   persist();
   renderPredictTab();
+  renderTopbar();
 }
 
 /* ---------------- gacha ---------------- */
@@ -324,15 +347,19 @@ function matchCardHtml(match, kind) {
   const pickedTeam1 = pred && pred.pick === 'team1';
   const pickedTeam2 = pred && pred.pick === 'team2';
   const locked = !!pred;
+  const canAfford = state.data ? state.data.points >= BET_COST : true;
 
   let statusBadge = '';
   if (pred && pred.resolved) {
     statusBadge = pred.correct
-      ? `<span class="badge badge-correct">ทายถูก +20</span>`
-      : `<span class="badge badge-wrong">ทายพลาด +3</span>`;
+      ? `<span class="badge badge-correct">ทายถูก +${WIN_REWARD}</span>`
+      : `<span class="badge badge-wrong">ทายพลาด +${LOSE_REWARD}</span>`;
   } else if (pred) {
-    statusBadge = `<span class="badge badge-pending">รอผล</span>`;
+    statusBadge = `<span class="badge badge-pending">เดิมพัน ${pred.bet} PT · รอผล</span>`;
   }
+
+  const logo1 = match.team1_logo || PLACEHOLDER_LOGO;
+  const logo2 = match.team2_logo || PLACEHOLDER_LOGO;
 
   return `
   <div class="match-card">
@@ -341,19 +368,21 @@ function matchCardHtml(match, kind) {
       <span>${match.match_series || ''}</span>
     </div>
     <div class="match-teams">
-      <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked ? 'disabled' : ''}
+      <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
         onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}')">
-        ${match.team1}
+        <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="team-name">${match.team1}</span>
       </button>
       <span class="vs">VS</span>
-      <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked ? 'disabled' : ''}
+      <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
         onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}')">
-        ${match.team2}
+        <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="team-name">${match.team2}</span>
       </button>
     </div>
     <div class="match-footer">
       <span class="match-time">${match.time_until_match || ''}</span>
-      ${statusBadge}
+      ${statusBadge || (canAfford ? `<span class="bet-hint">เดิมพัน ${BET_COST} PT / ครั้ง</span>` : `<span class="bet-hint bet-hint-warn">แต้มไม่พอเดิมพัน</span>`)}
     </div>
   </div>`;
 }
@@ -361,7 +390,7 @@ function matchCardHtml(match, kind) {
 function renderPredictTab() {
   const list = document.getElementById('upcoming-list');
   if (!state.upcoming.length) {
-    list.innerHTML = '<p class="empty">ยังไม่มีแมตช์ที่กำลังจะแข่งในตอนนี้</p>';
+    list.innerHTML = '<p class="empty">ตอนนี้ยังไม่มีแมตช์ VCT Pacific ที่กำลังจะแข่ง (อาจอยู่ระหว่างพัก/รอสเตจถัดไป)</p>';
   } else {
     list.innerHTML = state.upcoming.map(m => matchCardHtml(m, 'upcoming')).join('');
   }
@@ -375,8 +404,8 @@ function renderPredictTab() {
     historyEl.innerHTML = entries.slice().reverse().map(([key, p]) => `
       <div class="history-row">
         <span>${p.team1} vs ${p.team2}</span>
-        <span class="history-pick">ทาย: ${p.pick === 'team1' ? p.team1 : p.team2}</span>
-        <span>${p.resolved ? (p.correct ? '<span class="badge badge-correct">ถูก</span>' : '<span class="badge badge-wrong">ผิด</span>') : '<span class="badge badge-pending">รอผล</span>'}</span>
+        <span class="history-pick">ทาย: ${p.pick === 'team1' ? p.team1 : p.team2} · เดิมพัน ${p.bet ?? BET_COST} PT</span>
+        <span>${p.resolved ? (p.correct ? `<span class="badge badge-correct">ถูก +${WIN_REWARD}</span>` : `<span class="badge badge-wrong">ผิด +${LOSE_REWARD}</span>`) : '<span class="badge badge-pending">รอผล</span>'}</span>
       </div>`).join('');
   }
 }
