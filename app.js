@@ -9,6 +9,9 @@
 // วิธีสร้าง อ่านใน README.md
 const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.googleusercontent.com';
 
+// vlrggapi.vercel.app (the original unofficial API) is currently down —
+// its own maintainer confirms it exceeded free-tier limits. Using a working
+// alternative unofficial API instead: https://github.com/Orloxx23/vlresports
 const API_BASE = 'https://vlr.orlandomm.net/api/v1';
 const FETCH_TIMEOUT_MS = 6000;
 
@@ -113,16 +116,43 @@ async function fetchWithTimeout(url, ms) {
   }
 }
 
+function normalizeMatch(m) {
+  const t1 = m.teams?.[0] || {};
+  const t2 = m.teams?.[1] || {};
+  return {
+    team1: t1.name || 'TBD',
+    team2: t2.name || 'TBD',
+    match_event: m.tournament || '',
+    match_series: m.event || '',
+    time_until_match: m.in ? `เริ่มใน ${m.in}` : (m.status || ''),
+    match_page: String(m.id),
+  };
+}
+
+function normalizeResult(r) {
+  const t1 = r.teams?.[0] || {};
+  const t2 = r.teams?.[1] || {};
+  return {
+    team1: t1.name || 'TBD',
+    team2: t2.name || 'TBD',
+    score1: t1.score,
+    score2: t2.score,
+    match_event: r.tournament || '',
+    match_page: String(r.id),
+  };
+}
+
 async function loadMatches() {
   const statusEl = document.getElementById('data-status');
   statusEl.textContent = 'กำลังดึงข้อมูลแมตช์จาก vlr.gg ...';
   try {
-    const [upcomingRes, resultsRes] = await Promise.all([
-      fetchWithTimeout(`${API_BASE}/match?q=upcoming`, FETCH_TIMEOUT_MS),
-      fetchWithTimeout(`${API_BASE}/match?q=results`, FETCH_TIMEOUT_MS),
+    const [matchesRes, resultsRes] = await Promise.all([
+      fetchWithTimeout(`${API_BASE}/matches`, FETCH_TIMEOUT_MS),
+      fetchWithTimeout(`${API_BASE}/results`, FETCH_TIMEOUT_MS),
     ]);
-    state.upcoming = upcomingRes?.data?.segments || [];
-    state.results = resultsRes?.data?.segments || [];
+    const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming');
+    state.upcoming = rawUpcoming.map(normalizeMatch);
+    state.results = (resultsRes?.data || []).map(normalizeResult);
     state.usingFallback = false;
     statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
   } catch (e) {
