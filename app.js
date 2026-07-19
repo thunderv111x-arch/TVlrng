@@ -45,8 +45,9 @@ function defaultUserData() {
     ownedThemes: ['theme_tactical'],
     equippedFrame: 'frame_default',
     equippedTheme: 'theme_tactical',
-    predictions: {},     // match_page -> { pick:'team1'|'team2', team1, team2, event, resolved, correct }
+    predictions: {},     // match_page -> { pick:'team1'|'team2', team1, team2, event, bet, resolved, correct, reward }
     stats: { total: 0, correct: 0 },
+    lastLoginBonus: null, // 'YYYY-MM-DD' ของวันล่าสุดที่ได้รับโบนัสรายวัน
   };
 }
 
@@ -102,6 +103,23 @@ function handleGoogleCredential(response) {
   state.data = loadUserData(state.user.sub);
   localStorage.setItem('valo_predict_last_sub', state.user.sub);
   onSignedIn();
+}
+
+/* ---------------- daily login bonus ---------------- */
+
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function checkDailyLoginBonus() {
+  if (!state.data) return;
+  const today = todayKey();
+  if (state.data.lastLoginBonus === today) return; // รับไปแล้ววันนี้
+  state.data.lastLoginBonus = today;
+  state.data.points += DAILY_LOGIN_BONUS;
+  persist();
+  setTimeout(() => alert(`🎁 โบนัสล็อกอินรายวัน: +${DAILY_LOGIN_BONUS} แต้ม!`), 50);
 }
 
 function signOut() {
@@ -204,11 +222,14 @@ function resolvePendingPredictions() {
     pred.resolved = true;
     pred.correct = winner === pred.pick;
     state.data.stats.total += 1;
+    const bet = pred.bet || BET_COST;
     if (pred.correct) {
       state.data.stats.correct += 1;
-      state.data.points += WIN_REWARD;
+      pred.reward = Math.round(bet * WIN_PAYOUT_MULTIPLIER);
+      state.data.points += pred.reward;
     } else {
-      state.data.points += LOSE_REWARD;
+      pred.reward = Math.round(bet * LOSE_REFUND_RATE); // คืนแค่ 25% ของที่เสียไป
+      state.data.points += pred.reward;
     }
     changed = true;
   }
@@ -220,12 +241,19 @@ function resolvePendingPredictions() {
 
 /* ---------------- predicting ---------------- */
 
-function makePrediction(matchKey, pick, team1, team2, event) {
+function makePrediction(matchKey, pick, team1, team2, event, rawBet) {
   if (!state.user) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะทายผลได้'); return; }
   if (state.data.predictions[matchKey]) return; // already predicted
-  if (state.data.points < BET_COST) { alert(`แต้มไม่พอสำหรับเดิมพัน ต้องมีอย่างน้อย ${BET_COST} แต้ม (มีอยู่ ${state.data.points})`); return; }
-  state.data.points -= BET_COST;
-  state.data.predictions[matchKey] = { pick, team1, team2, event, bet: BET_COST, resolved: false, correct: null };
+
+  let bet = parseInt(rawBet, 10);
+  if (isNaN(bet)) bet = BET_COST;
+  bet = Math.max(MIN_BET, Math.min(MAX_BET, bet));
+
+  if (state.data.points < bet) { alert(`แต้มไม่พอสำหรับเดิมพัน ${bet} แต้ม (มีอยู่ ${state.data.points})`); return; }
+  if (state.data.points < MIN_BET) { alert(`แต้มไม่พอสำหรับเดิมพันขั้นต่ำ ${MIN_BET} แต้ม (มีอยู่ ${state.data.points})`); return; }
+
+  state.data.points -= bet;
+  state.data.predictions[matchKey] = { pick, team1, team2, event, bet, resolved: false, correct: null, reward: null };
   persist();
   renderPredictTab();
   renderTopbar();
@@ -341,25 +369,43 @@ function renderTopbar() {
   }
 }
 
+function safeDomId(key) {
+  return 'bet_' + String(key).replace(/[^a-zA-Z0-9]/g, '_');
+}
+
 function matchCardHtml(match, kind) {
   const key = match.match_page || `${match.team1}-${match.team2}`;
   const pred = state.data ? state.data.predictions[key] : null;
   const pickedTeam1 = pred && pred.pick === 'team1';
   const pickedTeam2 = pred && pred.pick === 'team2';
   const locked = !!pred;
-  const canAfford = state.data ? state.data.points >= BET_COST : true;
+  const points = state.data ? state.data.points : 0;
+  const canAfford = state.data ? points >= MIN_BET : true;
+  const betInputId = safeDomId(key);
+  const maxBettable = Math.max(MIN_BET, Math.min(MAX_BET, points));
+  const defaultBet = Math.min(BET_COST, maxBettable);
 
   let statusBadge = '';
   if (pred && pred.resolved) {
     statusBadge = pred.correct
-      ? `<span class="badge badge-correct">ทายถูก +${WIN_REWARD}</span>`
-      : `<span class="badge badge-wrong">ทายพลาด +${LOSE_REWARD}</span>`;
+      ? `<span class="badge badge-correct">ทายถูก +${pred.reward}</span>`
+      : `<span class="badge badge-wrong">ทายพลาด +${pred.reward} (คืน 25%)</span>`;
   } else if (pred) {
     statusBadge = `<span class="badge badge-pending">เดิมพัน ${pred.bet} PT · รอผล</span>`;
   }
 
   const logo1 = match.team1_logo || PLACEHOLDER_LOGO;
   const logo2 = match.team2_logo || PLACEHOLDER_LOGO;
+
+  const betPicker = (!locked && canAfford) ? `
+    <div class="bet-picker">
+      <label for="${betInputId}">เดิมพัน:</label>
+      <input type="number" id="${betInputId}" class="bet-input"
+        min="${MIN_BET}" max="${maxBettable}" step="5" value="${defaultBet}">
+      <span class="bet-unit">PT</span>
+    </div>` : '';
+
+  const getBetJs = `document.getElementById('${betInputId}').value`;
 
   return `
   <div class="match-card">
@@ -369,20 +415,21 @@ function matchCardHtml(match, kind) {
     </div>
     <div class="match-teams">
       <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
-        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}')">
+        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs})">
         <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
         <span class="team-name">${match.team1}</span>
       </button>
       <span class="vs">VS</span>
       <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
-        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}')">
+        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs})">
         <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
         <span class="team-name">${match.team2}</span>
       </button>
     </div>
+    ${betPicker}
     <div class="match-footer">
       <span class="match-time">${match.time_until_match || ''}</span>
-      ${statusBadge || (canAfford ? `<span class="bet-hint">เดิมพัน ${BET_COST} PT / ครั้ง</span>` : `<span class="bet-hint bet-hint-warn">แต้มไม่พอเดิมพัน</span>`)}
+      ${statusBadge || (canAfford ? `<span class="bet-hint">เลือกเดิมพัน ${MIN_BET}–${maxBettable} PT</span>` : `<span class="bet-hint bet-hint-warn">แต้มไม่พอเดิมพัน (ขั้นต่ำ ${MIN_BET})</span>`)}
     </div>
   </div>`;
 }
@@ -405,7 +452,7 @@ function renderPredictTab() {
       <div class="history-row">
         <span>${p.team1} vs ${p.team2}</span>
         <span class="history-pick">ทาย: ${p.pick === 'team1' ? p.team1 : p.team2} · เดิมพัน ${p.bet ?? BET_COST} PT</span>
-        <span>${p.resolved ? (p.correct ? `<span class="badge badge-correct">ถูก +${WIN_REWARD}</span>` : `<span class="badge badge-wrong">ผิด +${LOSE_REWARD}</span>`) : '<span class="badge badge-pending">รอผล</span>'}</span>
+        <span>${p.resolved ? (p.correct ? `<span class="badge badge-correct">ถูก +${p.reward}</span>` : `<span class="badge badge-wrong">ผิด +${p.reward}</span>`) : '<span class="badge badge-pending">รอผล</span>'}</span>
       </div>`).join('');
   }
 }
@@ -461,6 +508,7 @@ function switchTab(name) {
 
 function onSignedIn() {
   applyTheme(state.data.equippedTheme);
+  checkDailyLoginBonus();
   renderTopbar();
   renderPredictTab();
   renderGachaTab();
