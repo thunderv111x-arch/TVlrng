@@ -9,7 +9,7 @@
 // วิธีสร้าง อ่านใน README.md
 const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.googleusercontent.com';
 
-const API_BASE = 'https://vlrggapi.vercel.app';
+const API_BASE = 'https://vlr.orlandomm.net/api/v1';
 const FETCH_TIMEOUT_MS = 6000;
 
 const state = {
