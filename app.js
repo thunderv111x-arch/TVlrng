@@ -187,6 +187,15 @@ async function loadMatches() {
     state.results = (resultsRes?.data || []).map(normalizeResult);
     state.usingFallback = false;
     statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ทุกลีก • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
+
+    // DEBUG: เปิด F12 -> Console เพื่อดูว่า API ส่ง tournament ชื่ออะไรมาบ้าง
+    // และระบบจัดหมวดลงลีกไหน (ช่วยตรวจว่าทำไมบางลีกไม่โผล่ในตัวกรอง)
+    const rawStatuses = [...new Set((matchesRes?.data || []).map(m => m.status))];
+    console.log('[predict.vlr debug] สถานะแมตช์ทั้งหมดที่ API ส่งมา:', rawStatuses);
+    console.table(
+      [...new Map(state.upcoming.map(m => [m.match_event, m.category])).entries()]
+        .map(([tournament, category]) => ({ tournament, category }))
+    );
   } catch (e) {
     console.warn('ดึงข้อมูลจาก vlr.gg ไม่สำเร็จ ใช้ข้อมูลตัวอย่างแทน', e);
     state.upcoming = FALLBACK_UPCOMING.map(m => ({ ...m, category: classifyTournament(m.match_event) }));
