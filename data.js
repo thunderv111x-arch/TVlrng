@@ -11,13 +11,16 @@
    Order matters: first matching test wins. 'other' must stay last.
    ============================================================ */
 const LEAGUE_CATEGORIES = [
-  { id: 'vct_intl',      label: 'VCT International',    test: n => /champions|masters|kickoff/i.test(n) },
+  // สำคัญ: ต้องเช็คภูมิภาคก่อน "international" เสมอ เพราะ "Kickoff" เป็นทัวร์นาเมนต์
+  // เปิดฤดูกาลของ "แต่ละภูมิภาค" (เช่น "VCT 2026: China Kickoff") ไม่ใช่รายการนานาชาติ
+  // มีแค่ Masters กับ Champions เท่านั้นที่เป็นนานาชาติจริงๆ (รวมทุกภูมิภาคมาแข่งกัน)
   { id: 'vct_pacific',   label: 'VCT Pacific',           test: n => /pacific/i.test(n) },
   { id: 'vct_americas',  label: 'VCT Americas',          test: n => /americas/i.test(n) },
   { id: 'vct_emea',      label: 'VCT EMEA',              test: n => /emea/i.test(n) },
-  { id: 'vct_china',     label: 'VCT China',             test: n => /china/i.test(n) },
+  { id: 'vct_china',     label: 'VCT China',             test: n => /china|\bcn\b/i.test(n) },
   { id: 'challengers',   label: 'VCT Challengers',       test: n => /challenger/i.test(n) },
   { id: 'game_changers', label: 'VCT Game Changers',     test: n => /game changers/i.test(n) },
+  { id: 'vct_intl',      label: 'VCT International',    test: n => /champions|masters/i.test(n) },
   { id: 'other',         label: 'ลีก/ทัวร์นาเมนต์อื่นๆ', test: () => true },
 ];
 
