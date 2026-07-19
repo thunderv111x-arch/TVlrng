@@ -14,6 +14,11 @@ const RARITY = {
 
 const GACHA_COST = 40; // points per case
 
+// ---- Betting economy: points are deducted the moment you predict ----
+const BET_COST = 15;    // แต้มที่หักทันทีตอนกดทาย
+const WIN_REWARD = 35;  // แต้มที่ได้คืนถ้าทายถูก (กำไรสุทธิ +20)
+const LOSE_REWARD = 3;  // แต้มปลอบใจถ้าทายผิด (ขาดทุนสุทธิ -12)
+
 // ---- Profile frame "skins" (decorative border/glow around avatar+card) ----
 const FRAME_CATALOG = [
   { id: 'frame_default',   name: 'มาตรฐาน',        rarity: 'common',    css: 'frame-default' },
@@ -41,13 +46,17 @@ const THEME_CATALOG = [
 ];
 
 // ---- Offline fallback matches (used only if the live vlr.gg API is unreachable) ----
+const PLACEHOLDER_LOGO = 'https://www.vlr.gg/img/vlr/tmp/vlr.png';
+
 const FALLBACK_UPCOMING = [
-  { team1: 'Sentinels', team2: 'Paper Rex', flag1: 'flag_us', flag2: 'flag_sg',
+  { team1: 'Paper Rex', team2: 'T1', flag1: 'flag_sg', flag2: 'flag_kr',
+    team1_logo: PLACEHOLDER_LOGO, team2_logo: PLACEHOLDER_LOGO,
     time_until_match: 'ตัวอย่างข้อมูล (API ล่ม)', match_series: 'Group Stage',
-    match_event: 'VCT 2026: Demo Event', match_page: 'demo-1' },
-  { team1: 'Fnatic', team2: 'LOUD', flag1: 'flag_gb', flag2: 'flag_br',
+    match_event: 'VCT 2026: Pacific Stage 2 (ตัวอย่าง)', match_page: 'demo-1' },
+  { team1: 'DRX', team2: 'Rex Regum Qeon', flag1: 'flag_kr', flag2: 'flag_id',
+    team1_logo: PLACEHOLDER_LOGO, team2_logo: PLACEHOLDER_LOGO,
     time_until_match: 'ตัวอย่างข้อมูล (API ล่ม)', match_series: 'Group Stage',
-    match_event: 'VCT 2026: Demo Event', match_page: 'demo-2' },
+    match_event: 'VCT 2026: Pacific Stage 2 (ตัวอย่าง)', match_page: 'demo-2' },
 ];
 
 const FALLBACK_RESULTS = [];
