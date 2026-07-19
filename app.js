@@ -7,7 +7,7 @@
 
 // !!! ตั้งค่าก่อนใช้งานจริง: ใส่ Google OAuth Client ID ของคุณเองที่นี่ !!!
 // วิธีสร้าง อ่านใน README.md
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.googleusercontent.com';
 
 const API_BASE = 'https://vlrggapi.vercel.app';
 const FETCH_TIMEOUT_MS = 6000;
