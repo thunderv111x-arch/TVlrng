@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PREDICT.VLR — ทายผลแมตช์ Valorant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<div id="app-shell" class="signed-out">
+
+  <!-- ===== Topbar ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <span class="brand-text">PREDICT<span class="brand-dot">.</span>VLR</span>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="predict" onclick="switchTab('predict')">ทายผล</button>
+      <button class="tab-btn" data-tab="gacha" onclick="switchTab('gacha')">คลังไอเทม</button>
+      <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">โปรไฟล์</button>
+    </nav>
+    <div class="auth-area">
+      <div id="g_signin_btn"></div>
+      <div id="user-box" class="user-box" style="display:none">
+        <img id="user-avatar" class="user-avatar" alt="">
+        <div class="user-info">
+          <span id="user-name" class="user-name"></span>
+          <span id="user-points" class="user-points"></span>
+        </div>
+        <button id="signout-btn" class="signout-btn" title="ออกจากระบบ">⎋</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="data-status" class="data-status">กำลังโหลด...</div>
+
+  <!-- ===== Signed-out gate ===== -->
+  <section class="gate">
+    <div class="gate-inner">
+      <p class="gate-eyebrow">// เข้าสู่ระบบเพื่อเริ่มทาย</p>
+      <h1 class="gate-title">ทายผลแมตช์ Valorant<br>สะสมแต้ม เปิดกล่อง แต่งโปรไฟล์</h1>
+      <p class="gate-sub">ข้อมูลแมตช์ดึงสดจาก vlr.gg — ทายถูกได้แต้ม เอาไปสุ่มเฟรม/ธีมมาโชว์บนโปรไฟล์ของคุณ</p>
+    </div>
+  </section>
+
+  <!-- ===== Main content ===== -->
+  <main class="content">
+
+    <!-- ---- TAB: Predict ---- -->
+    <section id="tab-predict" class="tab-panel active">
+      <h2 class="section-title">แมตช์ที่กำลังจะแข่ง</h2>
+      <div id="upcoming-list" class="match-grid"></div>
+
+      <h2 class="section-title">ประวัติการทาย</h2>
+      <div id="history-list" class="history-list"></div>
+    </section>
+
+    <!-- ---- TAB: Gacha / Inventory ---- -->
+    <section id="tab-gacha" class="tab-panel">
+      <div class="gacha-hero">
+        <div>
+          <h2 class="section-title" style="margin:0">เปิดกล่องไอเทม</h2>
+          <p class="gacha-sub">ราคา <span id="gacha-cost">40</span> แต้ม / กล่อง • แต้มปัจจุบัน: <strong id="gacha-points">0 PT</strong></p>
+        </div>
+        <button class="open-case-btn" onclick="openCase()">เปิดกล่อง</button>
+      </div>
+
+      <h3 class="subsection-title">เฟรมโปรไฟล์</h3>
+      <div id="frame-grid" class="inv-grid"></div>
+
+      <h3 class="subsection-title">ธีมตกแต่งเว็บ</h3>
+      <div id="theme-grid" class="inv-grid"></div>
+    </section>
+
+    <!-- ---- TAB: Profile ---- -->
+    <section id="tab-profile" class="tab-panel">
+      <h2 class="section-title">โปรไฟล์ของฉัน</h2>
+      <div class="profile-card">
+        <div id="profile-avatar-wrap" class="profile-avatar-wrap frame-default">
+          <img id="profile-avatar" class="profile-avatar" alt="">
+        </div>
+        <div class="profile-info">
+          <h3 id="profile-name" class="profile-name"></h3>
+          <p id="profile-points" class="profile-points"></p>
+          <div class="profile-stats">
+            <div><span id="profile-total">0</span><label>ทายทั้งหมด</label></div>
+            <div><span id="profile-correct">0</span><label>ทายถูก</label></div>
+            <div><span id="profile-accuracy">—</span><label>ความแม่น</label></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===== Case opening overlay ===== -->
+<div id="case-overlay" class="case-overlay">
+  <div class="case-modal">
+    <div class="case-marker"></div>
+    <div class="case-viewport"><div id="case-track" class="case-track"></div></div>
+    <div id="case-result" class="case-result">
+      <p id="case-result-rarity" class="case-result-rarity"></p>
+      <h3 id="case-result-name" class="case-result-name"></h3>
+      <button class="case-close-btn" onclick="closeCaseOverlay()">ปิด</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
