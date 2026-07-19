@@ -15,16 +15,10 @@ const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.goo
 const API_BASE = 'https://vlr.orlandomm.net/api/v1';
 const FETCH_TIMEOUT_MS = 6000;
 
-// เอาแค่ทัวร์นาเมนต์ที่ชื่อมีคำเหล่านี้ครบทุกคำ (ไม่สนตัวพิมพ์เล็ก/ใหญ่)
-// ตอนนี้ตั้งไว้ให้เอาเฉพาะ VCT Pacific เท่านั้น — ถ้าอยากดูลีกอื่นด้วย
-// แก้ array นี้ เช่น ['VCT'] จะได้ VCT ทุกภูมิภาค หรือ [] จะได้ทุกแมตช์
-const TOURNAMENT_FILTER_KEYWORDS = ['VCT', 'Pacific'];
-
-function matchesTournamentFilter(tournamentName) {
-  if (!TOURNAMENT_FILTER_KEYWORDS.length) return true;
-  const name = (tournamentName || '').toLowerCase();
-  return TOURNAMENT_FILTER_KEYWORDS.every(kw => name.includes(kw.toLowerCase()));
-}
+// เดิมเว็บนี้ล็อกไว้แค่ VCT Pacific เท่านั้น ตอนนี้เปลี่ยนเป็นดึงมาทุกลีก
+// แล้วให้ผู้ใช้เลือกดูเองผ่านตัวกรองลีกในหน้า "ทายผล" แทน
+// (การจัดหมวดหมู่ทำที่ data.js ผ่าน LEAGUE_CATEGORIES / classifyTournament)
+const LEAGUE_FILTER_STORAGE_KEY = 'valo_predict_league_filter';
 
 const state = {
   user: null,        // { sub, name, picture, email }
@@ -32,6 +26,7 @@ const state = {
   upcoming: [],
   results: [],
   usingFallback: false,
+  leagueFilter: localStorage.getItem(LEAGUE_FILTER_STORAGE_KEY) || 'all', // ตัวกรองลีก (global ไม่ผูกกับ user)
 };
 
 /* ---------------- storage helpers ---------------- */
@@ -148,21 +143,24 @@ async function fetchWithTimeout(url, ms) {
 function normalizeMatch(m) {
   const t1 = m.teams?.[0] || {};
   const t2 = m.teams?.[1] || {};
+  const tournamentName = m.tournament || '';
   return {
     team1: t1.name || 'TBD',
     team2: t2.name || 'TBD',
     team1_logo: t1.logo || PLACEHOLDER_LOGO,
     team2_logo: t2.logo || PLACEHOLDER_LOGO,
-    match_event: m.tournament || '',
+    match_event: tournamentName,
     match_series: m.event || '',
     time_until_match: m.in ? `เริ่มใน ${m.in}` : (m.status || ''),
     match_page: String(m.id),
+    category: classifyTournament(tournamentName),
   };
 }
 
 function normalizeResult(r) {
   const t1 = r.teams?.[0] || {};
   const t2 = r.teams?.[1] || {};
+  const tournamentName = r.tournament || '';
   return {
     team1: t1.name || 'TBD',
     team2: t2.name || 'TBD',
@@ -170,8 +168,9 @@ function normalizeResult(r) {
     team2_logo: t2.logo || PLACEHOLDER_LOGO,
     score1: t1.score,
     score2: t2.score,
-    match_event: r.tournament || '',
+    match_event: tournamentName,
     match_page: String(r.id),
+    category: classifyTournament(tournamentName),
   };
 }
 
@@ -183,17 +182,15 @@ async function loadMatches() {
       fetchWithTimeout(`${API_BASE}/matches`, FETCH_TIMEOUT_MS),
       fetchWithTimeout(`${API_BASE}/results`, FETCH_TIMEOUT_MS),
     ]);
-    const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming' && matchesTournamentFilter(m.tournament));
+    const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming');
     state.upcoming = rawUpcoming.map(normalizeMatch);
-    state.results = (resultsRes?.data || [])
-      .filter(r => matchesTournamentFilter(r.tournament))
-      .map(normalizeResult);
+    state.results = (resultsRes?.data || []).map(normalizeResult);
     state.usingFallback = false;
-    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • แสดงเฉพาะ VCT Pacific • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
+    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ทุกลีก • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
   } catch (e) {
     console.warn('ดึงข้อมูลจาก vlr.gg ไม่สำเร็จ ใช้ข้อมูลตัวอย่างแทน', e);
-    state.upcoming = FALLBACK_UPCOMING;
-    state.results = FALLBACK_RESULTS;
+    state.upcoming = FALLBACK_UPCOMING.map(m => ({ ...m, category: classifyTournament(m.match_event) }));
+    state.results = FALLBACK_RESULTS.map(r => ({ ...r, category: classifyTournament(r.match_event) }));
     state.usingFallback = true;
     statusEl.textContent = '⚠️ ต่อ API ของ vlr.gg ไม่ได้ตอนนี้ (unofficial API อาจล่มชั่วคราว) กำลังแสดงข้อมูลตัวอย่าง';
   }
@@ -434,12 +431,51 @@ function matchCardHtml(match, kind) {
   </div>`;
 }
 
+/* ---------------- league filter ---------------- */
+
+function setLeagueFilter(id) {
+  state.leagueFilter = id;
+  localStorage.setItem(LEAGUE_FILTER_STORAGE_KEY, id);
+  renderPredictTab();
+}
+
+function renderLeagueFilterBar() {
+  const bar = document.getElementById('league-filter-bar');
+  if (!bar) return;
+
+  // นับจำนวนแมตช์ต่อลีก จากแมตช์ที่กำลังจะแข่งตอนนี้ เพื่อโชว์เฉพาะลีกที่มีจริง
+  const counts = {};
+  state.upcoming.forEach(m => { counts[m.category] = (counts[m.category] || 0) + 1; });
+  const presentCategories = LEAGUE_CATEGORIES.filter(cat => counts[cat.id]);
+
+  if (!presentCategories.length) { bar.innerHTML = ''; return; }
+
+  const totalCount = state.upcoming.length;
+  const options = [`<option value="all" ${state.leagueFilter === 'all' ? 'selected' : ''}>ทุกลีก (${totalCount})</option>`]
+    .concat(presentCategories.map(cat =>
+      `<option value="${cat.id}" ${state.leagueFilter === cat.id ? 'selected' : ''}>${cat.label} (${counts[cat.id]})</option>`
+    ));
+
+  bar.innerHTML = `
+    <label for="league-filter-select">แสดงลีก:</label>
+    <select id="league-filter-select" onchange="setLeagueFilter(this.value)">${options.join('')}</select>`;
+}
+
+function getFilteredUpcoming() {
+  if (state.leagueFilter === 'all') return state.upcoming;
+  return state.upcoming.filter(m => m.category === state.leagueFilter);
+}
+
 function renderPredictTab() {
+  renderLeagueFilterBar();
   const list = document.getElementById('upcoming-list');
+  const filtered = getFilteredUpcoming();
   if (!state.upcoming.length) {
-    list.innerHTML = '<p class="empty">ตอนนี้ยังไม่มีแมตช์ VCT Pacific ที่กำลังจะแข่ง (อาจอยู่ระหว่างพัก/รอสเตจถัดไป)</p>';
+    list.innerHTML = '<p class="empty">ตอนนี้ยังไม่มีแมตช์ที่กำลังจะแข่ง</p>';
+  } else if (!filtered.length) {
+    list.innerHTML = '<p class="empty">ไม่มีแมตช์ในลีกที่เลือกตอนนี้ ลองเลือก "ทุกลีก" ดูนะ</p>';
   } else {
-    list.innerHTML = state.upcoming.map(m => matchCardHtml(m, 'upcoming')).join('');
+    list.innerHTML = filtered.map(m => matchCardHtml(m, 'upcoming')).join('');
   }
 
   const historyEl = document.getElementById('history-list');
