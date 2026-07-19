@@ -15,9 +15,15 @@ const RARITY = {
 const GACHA_COST = 40; // points per case
 
 // ---- Betting economy: points are deducted the moment you predict ----
-const BET_COST = 15;    // แต้มที่หักทันทีตอนกดทาย
-const WIN_REWARD = 35;  // แต้มที่ได้คืนถ้าทายถูก (กำไรสุทธิ +20)
-const LOSE_REWARD = 3;  // แต้มปลอบใจถ้าทายผิด (ขาดทุนสุทธิ -12)
+// ผู้เล่นเลือกจำนวนแต้มเดิมพันเองได้ (ภายใน MIN_BET–MAX_BET และไม่เกินแต้มที่มี)
+const BET_COST = 15;          // ค่าเริ่มต้นที่โชว์ในช่องกรอกเดิมพัน
+const MIN_BET = 10;           // เดิมพันขั้นต่ำ
+const MAX_BET = 300;          // เดิมพันสูงสุดต่อครั้ง
+const WIN_PAYOUT_MULTIPLIER = 2.3; // ทายถูก: ได้คืน = เดิมพัน x ตัวคูณนี้ (กำไรสุทธิ ~130%)
+const LOSE_REFUND_RATE = 0.25;     // ทายผิด: ได้คืนแค่ 25% ของแต้มที่เสียไป
+
+// ---- Daily login bonus ----
+const DAILY_LOGIN_BONUS = 100; // แต้มที่ได้ฟรีทุกวันตอนเข้าสู่ระบบครั้งแรกของวัน
 
 // ---- Profile frame "skins" (decorative border/glow around avatar+card) ----
 const FRAME_CATALOG = [
