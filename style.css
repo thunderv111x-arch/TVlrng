@@ -116,6 +116,14 @@ body::before {
 
 /* ---------------- Match cards (corner-bracket HUD motif) ---------------- */
 
+.league-filter-bar { display: flex; align-items: center; gap: 10px; margin: -8px 0 18px; font-size: 13px; color: var(--text-dim); }
+.league-filter-bar label { font-family: 'Rajdhani', sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.league-filter-bar select {
+  background: var(--bg-panel); color: var(--text); border: 1px solid var(--border);
+  padding: 8px 12px; border-radius: var(--radius); font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer;
+}
+.league-filter-bar select:hover { border-color: var(--accent-2); }
+
 .match-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-bottom: 40px; }
 
 .match-card {
