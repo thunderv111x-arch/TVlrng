@@ -174,6 +174,23 @@ function normalizeResult(r) {
   };
 }
 
+// ---- China backfill ----
+// API หลัก (/matches, /results แบบไม่ระบุภูมิภาค) บางทีดึงแมตช์ China มาไม่ครบ
+// เพราะ VCT China เล่นบนไคลเอนต์/เซิร์ฟเวอร์คนละชุดจากภูมิภาคอื่น ข้อมูลเลยไม่ค่อยไหลเข้า
+// pipeline เดียวกัน แทนที่จะไปพึ่ง API เจ้าอื่นที่ไม่มี public host ให้ใช้ฟรี (เช็คมาแล้วไม่มี)
+// เราใช้ API ตัวเดิมนี่แหละ ยิง query แยกด้วย region=ch (โค้ดภูมิภาคที่ vlr.gg ใช้เองสำหรับ China)
+// เป็นการ "เสริม" ไม่ใช่แทนที่ ถ้า endpoint ไม่รองรับพารามิเตอร์นี้จริง มันจะแค่คืนอาเรย์ว่าง
+// ไม่ทำให้หน้าเว็บพัง
+async function fetchChinaBackfill(endpoint) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/${endpoint}?region=ch`, FETCH_TIMEOUT_MS);
+    return res?.data || [];
+  } catch (e) {
+    console.warn(`[China backfill] ดึง ${endpoint}?region=ch ไม่สำเร็จ (endpoint นี้อาจไม่รองรับ region filter หรือช่วงนี้ไม่มีแมตช์จีน)`, e);
+    return [];
+  }
+}
+
 async function loadMatches() {
   const statusEl = document.getElementById('data-status');
   statusEl.textContent = 'กำลังดึงข้อมูลแมตช์จาก vlr.gg ...';
@@ -183,15 +200,30 @@ async function loadMatches() {
       fetchWithTimeout(`${API_BASE}/results`, FETCH_TIMEOUT_MS),
     ]);
     const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming');
-    state.upcoming = rawUpcoming.map(normalizeMatch);
-    state.results = (resultsRes?.data || []).map(normalizeResult);
+    const rawResults = resultsRes?.data || [];
+
+    // ยิงเสริมเฉพาะ China แบบขนาน แล้วรวมเข้าไปโดยไม่ซ้ำ (เทียบด้วย id)
+    const [chinaMatchesExtra, chinaResultsExtra] = await Promise.all([
+      fetchChinaBackfill('matches'),
+      fetchChinaBackfill('results'),
+    ]);
+    const chinaUpcomingExtra = chinaMatchesExtra.filter(m => m.status === 'Upcoming');
+    const seenUpcomingIds = new Set(rawUpcoming.map(m => m.id));
+    const newChinaUpcoming = chinaUpcomingExtra.filter(m => !seenUpcomingIds.has(m.id));
+    const seenResultIds = new Set(rawResults.map(r => r.id));
+    const newChinaResults = chinaResultsExtra.filter(r => !seenResultIds.has(r.id));
+
+    state.upcoming = [...rawUpcoming, ...newChinaUpcoming].map(normalizeMatch);
+    state.results = [...rawResults, ...newChinaResults].map(normalizeResult);
     state.usingFallback = false;
-    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ทุกลีก • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
+    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ทุกลีก • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง` +
+      (newChinaUpcoming.length ? ` (รวม China ที่เสริมมาเพิ่ม ${newChinaUpcoming.length})` : '');
 
     // DEBUG: เปิด F12 -> Console เพื่อดูว่า API ส่ง tournament ชื่ออะไรมาบ้าง
     // และระบบจัดหมวดลงลีกไหน (ช่วยตรวจว่าทำไมบางลีกไม่โผล่ในตัวกรอง)
     const rawStatuses = [...new Set((matchesRes?.data || []).map(m => m.status))];
-    console.log('[predict.vlr debug] สถานะแมตช์ทั้งหมดที่ API ส่งมา:', rawStatuses);
+    console.log('[predict.vlr debug] สถานะแมตช์ทั้งหมดที่ API หลักส่งมา:', rawStatuses);
+    console.log('[predict.vlr debug] แมตช์ China ที่ backfill เพิ่มเข้ามา:', newChinaUpcoming);
     console.table(
       [...new Map(state.upcoming.map(m => [m.match_event, m.category])).entries()]
         .map(([tournament, category]) => ({ tournament, category }))
