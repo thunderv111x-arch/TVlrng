@@ -87,6 +87,7 @@
         </div>
         <div class="profile-info">
           <h3 id="profile-name" class="profile-name"></h3>
+          <span id="profile-tag-badge" class="profile-tag-badge" style="display:none"></span>
           <p id="profile-points" class="profile-points"></p>
           <div class="profile-stats">
             <div><span id="profile-total">0</span><label>ทายทั้งหมด</label></div>
@@ -104,6 +105,18 @@
           <span id="daily-bonus-timer" class="daily-bonus-timer"></span>
         </div>
       </div>
+
+      <h3 class="subsection-title">กรอกโค้ด</h3>
+      <div class="redeem-card">
+        <p class="redeem-note">มีโค้ดพิเศษ? กรอกที่นี่เพื่อรับรางวัล — โค้ดแต่ละอันใช้ได้ครั้งเดียวต่อบัญชี</p>
+        <div class="redeem-form">
+          <input type="text" id="redeem-code-input" class="redeem-input" placeholder="กรอกโค้ดที่นี่" autocomplete="off">
+          <button class="redeem-btn" onclick="redeemCode()">ใช้โค้ด</button>
+        </div>
+      </div>
+
+      <h3 class="subsection-title">แท็กโปรไฟล์</h3>
+      <div id="tag-grid" class="inv-grid tag-grid"></div>
 
       <h3 class="subsection-title">โอนแต้มให้เพื่อน</h3>
       <div class="transfer-card">
