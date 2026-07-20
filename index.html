@@ -66,9 +66,9 @@
       <div class="gacha-hero">
         <div>
           <h2 class="section-title" style="margin:0">เปิดกล่องไอเทม</h2>
-          <p class="gacha-sub">ราคา <span id="gacha-cost">40</span> แต้ม / กล่อง • แต้มปัจจุบัน: <strong id="gacha-points">0 PT</strong></p>
+          <p class="gacha-sub">ราคา <span id="gacha-cost">40</span> แต้ม / กล่อง • แต้มปัจจุบัน: <strong id="gacha-points">0 PT</strong> • กล่องฟรีคงเหลือ: <strong id="gacha-free-cases">0</strong></p>
         </div>
-        <button class="open-case-btn" onclick="openCase()">เปิดกล่อง</button>
+        <button id="open-case-btn" class="open-case-btn" onclick="openCase()">เปิดกล่อง</button>
       </div>
 
       <h3 class="subsection-title">เฟรมโปรไฟล์</h3>
@@ -93,6 +93,15 @@
             <div><span id="profile-correct">0</span><label>ทายถูก</label></div>
             <div><span id="profile-accuracy">—</span><label>ความแม่น</label></div>
           </div>
+        </div>
+      </div>
+
+      <h3 class="subsection-title">โบนัสล็อกอินรายวัน</h3>
+      <div class="daily-bonus-card">
+        <p class="daily-bonus-note">กดรับได้เองทุก 24 ชั่วโมงนับจากครั้งล่าสุดที่กด (ไม่ใช่ตามวันปฏิทิน) — ผูกกับอีเมล Google ที่ล็อกอินอยู่นี้เท่านั้น ล็อกอินอีเมลอื่นจะนับสิทธิ์แยกกัน</p>
+        <div class="daily-bonus-row">
+          <button id="daily-bonus-btn" class="daily-bonus-btn" onclick="claimDailyBonus()">รับโบนัสวันนี้</button>
+          <span id="daily-bonus-timer" class="daily-bonus-timer"></span>
         </div>
       </div>
 
