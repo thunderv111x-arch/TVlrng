@@ -9,16 +9,11 @@
 // วิธีสร้าง อ่านใน README.md
 const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.googleusercontent.com';
 
-// ---- Multi-source API with automatic failover ----
-// ตัวหลัก: vlr.orlandomm.net (https://github.com/Orloxx23/vlresports)
-// ตัวสำรอง: vlrggapi.vercel.app (https://github.com/axsddlr/vlrggapi) — เคยล่มเพราะ
-// เกิน free-tier limit แต่ schema ของมันตรงกับ field ที่เว็บนี้ใช้อยู่แล้ว (team1, team1_logo,
-// match_event, time_until_match ...) เพราะฉะนั้นถ้ามันกลับมาทำงาน เราสลับไปใช้ได้ทันทีแบบแทบไม่ต้องแปลงข้อมูล
-// ถ้าทั้งคู่ล่มพร้อมกัน -> ใช้แคชข้อมูลจริงล่าสุดที่เคยดึงได้ (ดู DATA_CACHE_KEY ด้านล่าง)
-// ถ้าไม่มีแคชเลย (เปิดเว็บครั้งแรกตอน API ล่มพอดี) -> ค่อยใช้ข้อมูลตัวอย่าง (FALLBACK_*) เป็นทางเลือกสุดท้ายจริงๆ
-const API_BASE = 'https://vlr.orlandomm.net/api/v1'; // เก็บไว้เผื่อมีที่อื่นอ้างอิงชื่อนี้
+// vlrggapi.vercel.app (the original unofficial API) is currently down —
+// its own maintainer confirms it exceeded free-tier limits. Using a working
+// alternative unofficial API instead: https://github.com/Orloxx23/vlresports
+const API_BASE = 'https://vlr.orlandomm.net/api/v1';
 const FETCH_TIMEOUT_MS = 6000;
-const DATA_CACHE_KEY = 'valo_predict_data_cache_v1';
 
 // เดิมเว็บนี้ล็อกไว้แค่ VCT Pacific เท่านั้น ตอนนี้เปลี่ยนเป็นดึงมาทุกลีก
 // แล้วให้ผู้ใช้เลือกดูเองผ่านตัวกรองลีกในหน้า "ทายผล" แทน
@@ -238,14 +233,16 @@ function normalizeResult(r) {
   };
 }
 
-// ---- China backfill (เฉพาะแหล่งข้อมูล orlandomm เท่านั้น) ----
+// ---- China backfill ----
 // API หลัก (/matches, /results แบบไม่ระบุภูมิภาค) บางทีดึงแมตช์ China มาไม่ครบ
 // เพราะ VCT China เล่นบนไคลเอนต์/เซิร์ฟเวอร์คนละชุดจากภูมิภาคอื่น ข้อมูลเลยไม่ค่อยไหลเข้า
-// pipeline เดียวกัน เราใช้ API ตัวเดิมนี่แหละ ยิง query แยกด้วย region=ch (โค้ดภูมิภาคที่ vlr.gg ใช้เองสำหรับ China)
-// เป็นการ "เสริม" ไม่ใช่แทนที่ ถ้า endpoint ไม่รองรับพารามิเตอร์นี้จริง มันจะแค่คืนอาเรย์ว่าง ไม่ทำให้หน้าเว็บพัง
+// pipeline เดียวกัน แทนที่จะไปพึ่ง API เจ้าอื่นที่ไม่มี public host ให้ใช้ฟรี (เช็คมาแล้วไม่มี)
+// เราใช้ API ตัวเดิมนี่แหละ ยิง query แยกด้วย region=ch (โค้ดภูมิภาคที่ vlr.gg ใช้เองสำหรับ China)
+// เป็นการ "เสริม" ไม่ใช่แทนที่ ถ้า endpoint ไม่รองรับพารามิเตอร์นี้จริง มันจะแค่คืนอาเรย์ว่าง
+// ไม่ทำให้หน้าเว็บพัง
 async function fetchChinaBackfill(endpoint) {
   try {
-    const res = await fetchWithTimeout(`https://vlr.orlandomm.net/api/v1/${endpoint}?region=ch`, FETCH_TIMEOUT_MS);
+    const res = await fetchWithTimeout(`${API_BASE}/${endpoint}?region=ch`, FETCH_TIMEOUT_MS);
     return res?.data || [];
   } catch (e) {
     console.warn(`[China backfill] ดึง ${endpoint}?region=ch ไม่สำเร็จ (endpoint นี้อาจไม่รองรับ region filter หรือช่วงนี้ไม่มีแมตช์จีน)`, e);
@@ -253,155 +250,49 @@ async function fetchChinaBackfill(endpoint) {
   }
 }
 
-// ---- แหล่งข้อมูลที่ 1: vlr.orlandomm.net ----
-async function loadFromOrlandomm() {
-  const [matchesRes, resultsRes] = await Promise.all([
-    fetchWithTimeout('https://vlr.orlandomm.net/api/v1/matches', FETCH_TIMEOUT_MS),
-    fetchWithTimeout('https://vlr.orlandomm.net/api/v1/results', FETCH_TIMEOUT_MS),
-  ]);
-  const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming');
-  const rawResults = resultsRes?.data || [];
-
-  // ยิงเสริมเฉพาะ China แบบขนาน แล้วรวมเข้าไปโดยไม่ซ้ำ (เทียบด้วย id)
-  const [chinaMatchesExtra, chinaResultsExtra] = await Promise.all([
-    fetchChinaBackfill('matches'),
-    fetchChinaBackfill('results'),
-  ]);
-  const chinaUpcomingExtra = chinaMatchesExtra.filter(m => m.status === 'Upcoming');
-  const seenUpcomingIds = new Set(rawUpcoming.map(m => m.id));
-  const newChinaUpcoming = chinaUpcomingExtra.filter(m => !seenUpcomingIds.has(m.id));
-  const seenResultIds = new Set(rawResults.map(r => r.id));
-  const newChinaResults = chinaResultsExtra.filter(r => !seenResultIds.has(r.id));
-
-  // DEBUG: เปิด F12 -> Console เพื่อดูว่า API ส่ง tournament ชื่ออะไรมาบ้าง
-  const rawStatuses = [...new Set((matchesRes?.data || []).map(m => m.status))];
-  console.log('[predict.vlr debug] สถานะแมตช์ทั้งหมดที่ API หลักส่งมา:', rawStatuses);
-  console.log('[predict.vlr debug] แมตช์ China ที่ backfill เพิ่มเข้ามา:', newChinaUpcoming);
-
-  return {
-    upcoming: [...rawUpcoming, ...newChinaUpcoming].map(normalizeMatch),
-    results: [...rawResults, ...newChinaResults].map(normalizeResult),
-    note: newChinaUpcoming.length ? ` (รวม China ที่เสริมมาเพิ่ม ${newChinaUpcoming.length})` : '',
-  };
-}
-
-// ---- แหล่งข้อมูลที่ 2 (สำรอง): vlrggapi.vercel.app ----
-// schema ของ API ตัวนี้ (segments: team1, team1_logo, match_event, time_until_match, match_page ...)
-// ตรงกับ field ที่เว็บนี้ใช้อยู่แล้วเกือบทั้งหมด เพราะโค้ด normalize ของเว็บนี้ถูกออกแบบตาม schema เดิมนี้
-// เลยแทบไม่ต้องแปลงอะไรเพิ่ม แค่เติม category (จัดหมวดลีก) และกัน field ที่ไม่มีให้ไม่พัง
-function normalizeVlrggapiMatch(m) {
-  const event = m.match_event || '';
-  return {
-    team1: m.team1 || 'TBD',
-    team2: m.team2 || 'TBD',
-    team1_logo: m.team1_logo || PLACEHOLDER_LOGO,
-    team2_logo: m.team2_logo || PLACEHOLDER_LOGO,
-    match_event: event,
-    match_series: m.match_series || '',
-    time_until_match: m.time_until_match || '',
-    match_page: String(m.match_page || `${m.team1}-${m.team2}-${event}`),
-    category: classifyTournament(event),
-  };
-}
-
-function normalizeVlrggapiResult(r) {
-  const event = r.tournament_name || r.match_event || '';
-  return {
-    team1: r.team1 || 'TBD',
-    team2: r.team2 || 'TBD',
-    team1_logo: r.team1_logo || PLACEHOLDER_LOGO,
-    team2_logo: r.team2_logo || PLACEHOLDER_LOGO,
-    score1: r.score1,
-    score2: r.score2,
-    match_event: event,
-    match_page: String(r.match_page || `${r.team1}-${r.team2}-${event}`),
-    category: classifyTournament(event),
-  };
-}
-
-async function loadFromVlrggapi() {
-  const [upcomingRes, resultsRes] = await Promise.all([
-    fetchWithTimeout('https://vlrggapi.vercel.app/match?q=upcoming', FETCH_TIMEOUT_MS),
-    fetchWithTimeout('https://vlrggapi.vercel.app/match?q=results', FETCH_TIMEOUT_MS),
-  ]);
-  const rawUpcoming = upcomingRes?.data?.segments || [];
-  const rawResults = resultsRes?.data?.segments || [];
-  if (!rawUpcoming.length && !rawResults.length) throw new Error('vlrggapi ตอบกลับมาแต่ไม่มีข้อมูลแมตช์เลย');
-  return {
-    upcoming: rawUpcoming.map(normalizeVlrggapiMatch),
-    results: rawResults.map(normalizeVlrggapiResult),
-    note: '',
-  };
-}
-
-/* ---------------- local cache: ผลดึงข้อมูลจริงล่าสุดที่เคยสำเร็จ ---------------- */
-// เก็บไว้ใช้เป็นทางสำรองอันดับสุดท้าย (ก่อนจะถึงข้อมูลตัวอย่างปลอม) เผื่อทุกแหล่งล่มพร้อมกัน
-// จะได้เห็น "แมตช์จริง" (แม้จะไม่ล่าสุด) แทนข้อมูลปลอมล้วนๆ
-
-function saveDataCache(upcoming, results) {
-  try {
-    localStorage.setItem(DATA_CACHE_KEY, JSON.stringify({ upcoming, results, savedAt: Date.now() }));
-  } catch (e) { /* localStorage เต็มหรือปิดอยู่ ไม่เป็นไร ข้ามไป */ }
-}
-
-function loadDataCache() {
-  try { return JSON.parse(localStorage.getItem(DATA_CACHE_KEY)); }
-  catch (e) { return null; }
-}
-
-function formatCacheAge(savedAt) {
-  const mins = Math.round((Date.now() - savedAt) / 60000);
-  if (mins < 1) return 'เมื่อสักครู่';
-  if (mins < 60) return `${mins} นาทีที่แล้ว`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} ชั่วโมงที่แล้ว`;
-  return `${Math.round(hrs / 24)} วันที่แล้ว`;
-}
-
-/* ---------------- data fetching: ลองทีละแหล่งจนกว่าจะสำเร็จ ---------------- */
-
-const DATA_SOURCES = [
-  { label: 'vlr.orlandomm.net', run: loadFromOrlandomm },
-  { label: 'vlrggapi.vercel.app (สำรอง)', run: loadFromVlrggapi },
-];
-
 async function loadMatches() {
   const statusEl = document.getElementById('data-status');
   statusEl.textContent = 'กำลังดึงข้อมูลแมตช์จาก vlr.gg ...';
+  try {
+    const [matchesRes, resultsRes] = await Promise.all([
+      fetchWithTimeout(`${API_BASE}/matches`, FETCH_TIMEOUT_MS),
+      fetchWithTimeout(`${API_BASE}/results`, FETCH_TIMEOUT_MS),
+    ]);
+    const rawUpcoming = (matchesRes?.data || []).filter(m => m.status === 'Upcoming');
+    const rawResults = resultsRes?.data || [];
 
-  for (const source of DATA_SOURCES) {
-    try {
-      const { upcoming, results, note } = await source.run();
-      state.upcoming = upcoming;
-      state.results = results;
-      state.usingFallback = false;
-      saveDataCache(upcoming, results);
-      statusEl.textContent = `เชื่อมต่อ ${source.label} สำเร็จ • ทุกลีก • ${upcoming.length} แมตช์ที่กำลังจะแข่ง${note || ''}`;
-      console.table(
-        [...new Map(upcoming.map(m => [m.match_event, m.category])).entries()]
-          .map(([tournament, category]) => ({ tournament, category }))
-      );
-      resolvePendingPredictions();
-      renderPredictTab();
-      return;
-    } catch (e) {
-      console.warn(`[${source.label}] ดึงข้อมูลไม่สำเร็จ กำลังลองแหล่งถัดไป...`, e);
-    }
-  }
+    // ยิงเสริมเฉพาะ China แบบขนาน แล้วรวมเข้าไปโดยไม่ซ้ำ (เทียบด้วย id)
+    const [chinaMatchesExtra, chinaResultsExtra] = await Promise.all([
+      fetchChinaBackfill('matches'),
+      fetchChinaBackfill('results'),
+    ]);
+    const chinaUpcomingExtra = chinaMatchesExtra.filter(m => m.status === 'Upcoming');
+    const seenUpcomingIds = new Set(rawUpcoming.map(m => m.id));
+    const newChinaUpcoming = chinaUpcomingExtra.filter(m => !seenUpcomingIds.has(m.id));
+    const seenResultIds = new Set(rawResults.map(r => r.id));
+    const newChinaResults = chinaResultsExtra.filter(r => !seenResultIds.has(r.id));
 
-  // ทุกแหล่งล่มหมด -> ลองใช้แคชข้อมูลจริงล่าสุดก่อน ถ้าไม่มีแคชเลยค่อยใช้ข้อมูลตัวอย่าง
-  const cache = loadDataCache();
-  if (cache && (cache.upcoming?.length || cache.results?.length)) {
-    state.upcoming = cache.upcoming || [];
-    state.results = cache.results || [];
+    state.upcoming = [...rawUpcoming, ...newChinaUpcoming].map(normalizeMatch);
+    state.results = [...rawResults, ...newChinaResults].map(normalizeResult);
     state.usingFallback = false;
-    statusEl.textContent = `⚠️ ต่อ API ทุกแหล่งไม่ได้ตอนนี้ กำลังแสดง "ข้อมูลจริง" ล่าสุดที่เคยดึงได้ (${formatCacheAge(cache.savedAt)})`;
-  } else {
-    console.warn('ดึงข้อมูลจาก vlr.gg ไม่สำเร็จทุกแหล่ง และไม่มีแคช ใช้ข้อมูลตัวอย่างแทน');
+    statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ทุกลีก • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง` +
+      (newChinaUpcoming.length ? ` (รวม China ที่เสริมมาเพิ่ม ${newChinaUpcoming.length})` : '');
+
+    // DEBUG: เปิด F12 -> Console เพื่อดูว่า API ส่ง tournament ชื่ออะไรมาบ้าง
+    // และระบบจัดหมวดลงลีกไหน (ช่วยตรวจว่าทำไมบางลีกไม่โผล่ในตัวกรอง)
+    const rawStatuses = [...new Set((matchesRes?.data || []).map(m => m.status))];
+    console.log('[predict.vlr debug] สถานะแมตช์ทั้งหมดที่ API หลักส่งมา:', rawStatuses);
+    console.log('[predict.vlr debug] แมตช์ China ที่ backfill เพิ่มเข้ามา:', newChinaUpcoming);
+    console.table(
+      [...new Map(state.upcoming.map(m => [m.match_event, m.category])).entries()]
+        .map(([tournament, category]) => ({ tournament, category }))
+    );
+  } catch (e) {
+    console.warn('ดึงข้อมูลจาก vlr.gg ไม่สำเร็จ ใช้ข้อมูลตัวอย่างแทน', e);
     state.upcoming = FALLBACK_UPCOMING.map(m => ({ ...m, category: classifyTournament(m.match_event) }));
     state.results = FALLBACK_RESULTS.map(r => ({ ...r, category: classifyTournament(r.match_event) }));
     state.usingFallback = true;
-    statusEl.textContent = '⚠️ ต่อ API ของ vlr.gg ไม่ได้เลยตอนนี้ (ลองทุกแหล่งแล้ว) กำลังแสดงข้อมูลตัวอย่าง';
+    statusEl.textContent = '⚠️ ต่อ API ของ vlr.gg ไม่ได้ตอนนี้ (unofficial API อาจล่มชั่วคราว) กำลังแสดงข้อมูลตัวอย่าง';
   }
   resolvePendingPredictions();
   renderPredictTab();
