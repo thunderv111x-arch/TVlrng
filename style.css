@@ -283,6 +283,24 @@ body::before {
 .profile-stats span { display: block; font-size: 22px; font-weight: 700; font-family: 'Share Tech Mono', monospace; }
 .profile-stats label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em; }
 
+/* ---------------- Daily login bonus ---------------- */
+
+.daily-bonus-card {
+  background: var(--bg-panel); border: 1px solid var(--border); padding: 24px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.daily-bonus-note { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 0; }
+.daily-bonus-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.daily-bonus-btn {
+  background: var(--accent); color: var(--bg); border: none; padding: 12px 26px;
+  font-family: 'Rajdhani', sans-serif; text-transform: uppercase; letter-spacing: .03em;
+  font-size: 14px; font-weight: 700; border-radius: 3px; transition: transform .1s, box-shadow .15s, opacity .15s;
+}
+.daily-bonus-btn:hover:not(:disabled) { box-shadow: 0 0 0 3px rgba(255,59,78,0.25); }
+.daily-bonus-btn:active:not(:disabled) { transform: scale(.97); }
+.daily-bonus-btn:disabled { background: var(--bg-panel-2); color: var(--text-dim); cursor: default; }
+.daily-bonus-timer { font-family: 'Share Tech Mono', monospace; font-size: 13px; color: var(--accent-2); }
+
 /* ---------------- Point transfer ---------------- */
 
 .transfer-card {
@@ -320,4 +338,6 @@ body::before {
   .profile-stats { justify-content: center; }
   .transfer-form { flex-direction: column; }
   .transfer-input, .transfer-input.transfer-amount { width: 100%; }
+  .daily-bonus-row { flex-direction: column; align-items: stretch; }
+  .daily-bonus-btn { width: 100%; }
 }
