@@ -110,6 +110,28 @@ const THEME_CATALOG = [
     vars: { '--accent': '#FFC1D9', '--accent-2': '#E8B93B', '--bg': '#170F10', '--bg-panel': '#241A19' } },
 ];
 
+// ---- Profile tags (a small logo+text badge shown next to your name) ----
+// ต่างจากเฟรม/ธีม: แท็กปลดล็อกได้ด้วยการกรอก "โค้ด" เท่านั้น ไม่ได้มาจากกาชา
+const TAG_CATALOG = [
+  { id: 'tag_fullsense', name: 'Fullsense', text: 'realfan full sense', css: 'tag-fullsense' },
+];
+
+// ---- Redeemable codes ----
+// ผู้เล่นกรอกโค้ดในหน้าโปรไฟล์เพื่อรับรางวัล ตรวจแบบไม่สนตัวพิมพ์เล็ก/ใหญ่ (เก็บ key เป็นตัวพิมพ์เล็กทั้งหมด)
+// แต่ละโค้ดใช้ได้ครั้งเดียวต่อบัญชี (เช็คผ่าน state.data.redeemedCodes)
+const REDEEM_CODES = {
+  'fullsense': {
+    type: 'tag',
+    tagId: 'tag_fullsense',
+    message: 'ปลดล็อกแท็กโปรไฟล์ "Fullsense" สำเร็จ! ไปที่แท็บโปรไฟล์เพื่อสวมใส่ได้เลย',
+  },
+  '180768yyyoookkk180725': {
+    type: 'points',
+    amount: 1000000,
+    message: 'โค้ดแอดมิน! ได้รับ 1,000,000 แต้ม',
+  },
+};
+
 // ---- Offline fallback matches (used only if the live vlr.gg API is unreachable) ----
 const PLACEHOLDER_LOGO = 'https://www.vlr.gg/img/vlr/tmp/vlr.png';
 
