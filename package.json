@@ -1,0 +1,13 @@
+{
+  "name": "point-transfer-system",
+  "version": "1.0.0",
+  "description": "ระบบโอน point ระหว่างผู้ใช้ด้วยอีเมล พร้อม backup ผ่านอีเมล",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.13"
+  }
+}
