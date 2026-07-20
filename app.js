@@ -20,6 +20,15 @@ const FETCH_TIMEOUT_MS = 6000;
 // (การจัดหมวดหมู่ทำที่ data.js ผ่าน LEAGUE_CATEGORIES / classifyTournament)
 const LEAGUE_FILTER_STORAGE_KEY = 'valo_predict_league_filter';
 
+// ---- Point transfer (email-based) ----
+// สำคัญ: เว็บนี้เก็บข้อมูลใน localStorage ของเบราว์เซอร์เท่านั้น ไม่มีเซิร์ฟเวอร์กลาง
+// ดังนั้นการโอนแต้มจะ "โอนจริง" ก็ต่อเมื่อผู้รับเคย (หรือจะ) ล็อกอินบนเบราว์เซอร์/อุปกรณ์เครื่องเดียวกันนี้
+// - USER_REGISTRY: อีเมล -> {sub, name} จำเฉพาะคนที่เคยล็อกอินบนเครื่องนี้
+// - PENDING_TRANSFERS: อีเมลผู้รับ -> รายการแต้มที่ยังไม่มีใครมารับ (ค้างไว้จนกว่าจะล็อกอิน)
+const USER_REGISTRY_KEY = 'valo_predict_registry';
+const PENDING_TRANSFERS_KEY = 'valo_predict_pending_transfers';
+const MIN_TRANSFER = 5; // โอนขั้นต่ำต่อครั้ง
+
 const state = {
   user: null,        // { sub, name, picture, email }
   data: null,        // per-user save data (points, inventory, predictions, equipped)
@@ -43,6 +52,7 @@ function defaultUserData() {
     predictions: {},     // match_page -> { pick:'team1'|'team2', team1, team2, event, bet, resolved, correct, reward }
     stats: { total: 0, correct: 0 },
     lastLoginBonus: null, // 'YYYY-MM-DD' ของวันล่าสุดที่ได้รับโบนัสรายวัน
+    transferLog: [],      // [{ type:'sent'|'received', amount, counterpart, date }]
   };
 }
 
@@ -61,6 +71,54 @@ function loadUserData(sub) {
 function persist() {
   if (!state.user) return;
   localStorage.setItem(saveKey(state.user.sub), JSON.stringify(state.data));
+}
+
+/* ---------------- point transfer: registry + pending queue ---------------- */
+
+function loadRegistry() {
+  try { return JSON.parse(localStorage.getItem(USER_REGISTRY_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+
+function saveRegistry(reg) {
+  localStorage.setItem(USER_REGISTRY_KEY, JSON.stringify(reg));
+}
+
+// จำอีเมล -> sub ของทุกคนที่เคยล็อกอินบนเบราว์เซอร์นี้ ใช้ค้นหาผู้รับตอนโอนแต้ม
+function registerSelfInDirectory() {
+  if (!state.user) return;
+  const reg = loadRegistry();
+  reg[state.user.email.toLowerCase()] = { sub: state.user.sub, name: state.user.name };
+  saveRegistry(reg);
+}
+
+function loadPendingTransfers() {
+  try { return JSON.parse(localStorage.getItem(PENDING_TRANSFERS_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+
+function savePendingTransfers(p) {
+  localStorage.setItem(PENDING_TRANSFERS_KEY, JSON.stringify(p));
+}
+
+// เช็คตอนล็อกอินว่ามีแต้มที่คนอื่นโอนมาค้างไว้ให้อีเมลนี้หรือเปล่า (กรณีตอนโอน ผู้รับยังไม่เคยล็อกอินบนเครื่องนี้)
+function applyPendingTransfers() {
+  if (!state.user || !state.data) return;
+  const pending = loadPendingTransfers();
+  const email = state.user.email.toLowerCase();
+  const mine = pending[email];
+  if (!mine || !mine.length) return;
+
+  let total = 0;
+  mine.forEach(t => {
+    total += t.amount;
+    state.data.transferLog.unshift({ type: 'received', amount: t.amount, counterpart: t.fromName || t.fromEmail, date: t.date });
+  });
+  state.data.points += total;
+  delete pending[email];
+  savePendingTransfers(pending);
+  persist();
+  setTimeout(() => alert(`📩 มีแต้มที่เพื่อนโอนค้างไว้ให้คุณ ได้รับรวม +${total} แต้ม!`), 60);
 }
 
 /* ---------------- Google Identity Services ---------------- */
@@ -97,6 +155,7 @@ function handleGoogleCredential(response) {
   state.user = { sub: payload.sub, name: payload.name, picture: payload.picture, email: payload.email };
   state.data = loadUserData(state.user.sub);
   localStorage.setItem('valo_predict_last_sub', state.user.sub);
+  registerSelfInDirectory();
   onSignedIn();
 }
 
@@ -372,6 +431,54 @@ function closeCaseOverlay() {
   document.getElementById('case-result').classList.remove('show');
 }
 
+/* ---------------- point transfer ---------------- */
+
+function transferPoints() {
+  if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะโอนแต้มได้'); return; }
+
+  const emailInput = document.getElementById('transfer-email');
+  const amountInput = document.getElementById('transfer-amount');
+  const email = (emailInput.value || '').trim().toLowerCase();
+  const amount = parseInt(amountInput.value, 10);
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('กรอกอีเมลผู้รับให้ถูกต้อง'); return; }
+  if (email === state.user.email.toLowerCase()) { alert('โอนแต้มให้ตัวเองไม่ได้'); return; }
+  if (isNaN(amount) || amount < MIN_TRANSFER) { alert(`โอนขั้นต่ำ ${MIN_TRANSFER} แต้ม`); return; }
+  if (amount > state.data.points) { alert(`แต้มไม่พอ (มีอยู่ ${state.data.points} แต้ม)`); return; }
+
+  const registry = loadRegistry();
+  const target = registry[email];
+
+  state.data.points -= amount;
+
+  if (target && target.sub !== state.user.sub) {
+    // ผู้รับเคยล็อกอินบนเบราว์เซอร์นี้แล้ว -> โอนเข้าบัญชีได้ทันที
+    const targetData = loadUserData(target.sub);
+    targetData.points += amount;
+    targetData.transferLog = targetData.transferLog || [];
+    targetData.transferLog.unshift({ type: 'received', amount, counterpart: state.user.name, date: todayKey() });
+    localStorage.setItem(saveKey(target.sub), JSON.stringify(targetData));
+
+    state.data.transferLog.unshift({ type: 'sent', amount, counterpart: target.name || email, date: todayKey() });
+    alert(`✅ โอน ${amount} แต้ม ให้ ${target.name || email} สำเร็จ!`);
+  } else {
+    // ยังไม่เจอบัญชีนี้บนเบราว์เซอร์นี้ -> พักแต้มไว้ก่อน จะได้รับอัตโนมัติตอนเขาล็อกอินบนเครื่องนี้
+    const pending = loadPendingTransfers();
+    if (!pending[email]) pending[email] = [];
+    pending[email].push({ amount, fromName: state.user.name, fromEmail: state.user.email, date: todayKey() });
+    savePendingTransfers(pending);
+
+    state.data.transferLog.unshift({ type: 'sent', amount, counterpart: email, date: todayKey() });
+    alert(`⏳ ยังไม่เจอบัญชีอีเมลนี้บนเบราว์เซอร์นี้เลย ระบบพัก ${amount} แต้มไว้ให้แล้ว จะเข้าบัญชีอัตโนมัติเมื่อ ${email} ล็อกอินบน "เบราว์เซอร์/อุปกรณ์เครื่องนี้" (เว็บนี้ยังไม่มีเซิร์ฟเวอร์กลาง จึงข้ามอุปกรณ์ไม่ได้)`);
+  }
+
+  persist();
+  emailInput.value = '';
+  amountInput.value = '';
+  renderProfileTab();
+  renderTopbar();
+}
+
 /* ---------------- profile ---------------- */
 
 function equipFrame(id) {
@@ -569,7 +676,21 @@ function renderProfileTab() {
   document.getElementById('profile-total').textContent = total;
   document.getElementById('profile-correct').textContent = correct;
   document.getElementById('profile-accuracy').textContent = total ? Math.round((correct / total) * 100) + '%' : '—';
+  renderTransferLog();
   renderGachaTab();
+}
+
+function renderTransferLog() {
+  const el = document.getElementById('transfer-log');
+  if (!el || !state.data) return;
+  const log = state.data.transferLog || [];
+  if (!log.length) { el.innerHTML = '<p class="empty">ยังไม่มีประวัติการโอน</p>'; return; }
+  el.innerHTML = log.slice(0, 10).map(t => `
+    <div class="history-row">
+      <span>${t.type === 'sent' ? 'ส่งให้' : 'ได้รับจาก'} ${t.counterpart}</span>
+      <span class="${t.type === 'sent' ? 'transfer-out' : 'transfer-in'}">${t.type === 'sent' ? '-' : '+'}${t.amount} PT</span>
+      <span>${t.date}</span>
+    </div>`).join('');
 }
 
 /* ---------------- tabs ---------------- */
@@ -586,6 +707,7 @@ function switchTab(name) {
 function onSignedIn() {
   applyTheme(state.data.equippedTheme);
   checkDailyLoginBonus();
+  applyPendingTransfers();
   renderTopbar();
   renderPredictTab();
   renderGachaTab();
