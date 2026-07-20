@@ -49,6 +49,9 @@ function defaultUserData() {
     ownedThemes: ['theme_tactical'],
     equippedFrame: 'frame_default',
     equippedTheme: 'theme_tactical',
+    ownedTags: [],         // แท็กโปรไฟล์ที่ปลดล็อกแล้ว (ได้จากโค้ดเท่านั้น)
+    equippedTag: null,     // id ของแท็กที่กำลังสวมอยู่ (null = ไม่ใส่)
+    redeemedCodes: [],     // โค้ดที่เคยกรอกไปแล้ว (เก็บเป็นตัวพิมพ์เล็กทั้งหมด) กันกรอกซ้ำ
     predictions: {},     // match_page -> { pick:'team1'|'team2', team1, team2, event, bet, resolved, correct, reward }
     stats: { total: 0, correct: 0 },
     lastLoginBonusAt: null, // timestamp (ms) ครั้งล่าสุดที่ "กดรับ" โบนัสรายวัน (รีทุก 24 ชม. นับจากเวลานี้)
@@ -535,6 +538,75 @@ function transferPoints() {
   renderTopbar();
 }
 
+/* ---------------- redeem codes ---------------- */
+
+function redeemCode() {
+  if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะกรอกโค้ดได้'); return; }
+
+  const input = document.getElementById('redeem-code-input');
+  const raw = (input.value || '').trim();
+  if (!raw) { alert('กรอกโค้ดก่อนสิ'); return; }
+
+  const key = raw.toLowerCase();
+  const def = REDEEM_CODES[key];
+  if (!def) { alert('โค้ดนี้ไม่ถูกต้อง หรือไม่มีอยู่จริง'); return; }
+
+  state.data.redeemedCodes = state.data.redeemedCodes || [];
+  if (state.data.redeemedCodes.includes(key)) { alert('คุณใช้โค้ดนี้ไปแล้ว ใช้ซ้ำไม่ได้นะ'); return; }
+
+  if (def.type === 'points') {
+    state.data.points += def.amount;
+  } else if (def.type === 'tag') {
+    state.data.ownedTags = state.data.ownedTags || [];
+    if (!state.data.ownedTags.includes(def.tagId)) state.data.ownedTags.push(def.tagId);
+    if (!state.data.equippedTag) state.data.equippedTag = def.tagId; // ใส่ให้อัตโนมัติถ้ายังไม่มีแท็กอื่นอยู่
+  }
+
+  state.data.redeemedCodes.push(key);
+  persist();
+  input.value = '';
+  renderProfileTab();
+  renderTopbar();
+  alert('🎉 ' + def.message);
+}
+
+/* ---------------- profile tags ---------------- */
+
+function equipTag(id) {
+  state.data.equippedTag = id;
+  persist();
+  renderProfileTab();
+}
+
+function unequipTag() {
+  state.data.equippedTag = null;
+  persist();
+  renderProfileTab();
+}
+
+function renderTagGrid() {
+  const grid = document.getElementById('tag-grid');
+  if (!grid || !state.data) return;
+  const owned = state.data.ownedTags || [];
+  if (!owned.length) {
+    grid.innerHTML = '<p class="empty">ยังไม่มีแท็ก — ปลดล็อกได้ด้วยโค้ดพิเศษ</p>';
+    return;
+  }
+  grid.innerHTML = owned.map(id => {
+    const tag = TAG_CATALOG.find(t => t.id === id);
+    if (!tag) return '';
+    const equipped = state.data.equippedTag === id;
+    return `
+    <div class="inv-item ${equipped ? 'equipped' : ''}">
+      <div class="tag-preview ${tag.css}">
+        <span class="tag-preview-name">${tag.name}</span>
+        <span class="tag-preview-text">${tag.text}</span>
+      </div>
+      <button class="inv-equip-btn" onclick="${equipped ? 'unequipTag()' : `equipTag('${tag.id}')`}">${equipped ? 'เลิกใส่' : 'สวมใส่'}</button>
+    </div>`;
+  }).join('');
+}
+
 /* ---------------- profile ---------------- */
 
 function equipFrame(id) {
@@ -736,6 +808,19 @@ function renderProfileTab() {
   document.getElementById('profile-total').textContent = total;
   document.getElementById('profile-correct').textContent = correct;
   document.getElementById('profile-accuracy').textContent = total ? Math.round((correct / total) * 100) + '%' : '—';
+
+  const tagBadge = document.getElementById('profile-tag-badge');
+  const equippedTag = TAG_CATALOG.find(t => t.id === state.data.equippedTag);
+  if (equippedTag) {
+    tagBadge.className = 'profile-tag-badge ' + equippedTag.css;
+    tagBadge.innerHTML = `<span class="profile-tag-name">${equippedTag.name}</span><span class="profile-tag-text">${equippedTag.text}</span>`;
+    tagBadge.style.display = 'inline-flex';
+  } else {
+    tagBadge.style.display = 'none';
+    tagBadge.innerHTML = '';
+  }
+  renderTagGrid();
+
   renderTransferLog();
   renderGachaTab();
 }
