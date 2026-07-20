@@ -51,7 +51,8 @@ function defaultUserData() {
     equippedTheme: 'theme_tactical',
     predictions: {},     // match_page -> { pick:'team1'|'team2', team1, team2, event, bet, resolved, correct, reward }
     stats: { total: 0, correct: 0 },
-    lastLoginBonus: null, // 'YYYY-MM-DD' ของวันล่าสุดที่ได้รับโบนัสรายวัน
+    lastLoginBonusAt: null, // timestamp (ms) ครั้งล่าสุดที่ "กดรับ" โบนัสรายวัน (รีทุก 24 ชม. นับจากเวลานี้)
+    freeCases: 0,           // จำนวนกล่องสุ่มฟรีที่ได้จากโบนัสรายวัน ยังไม่ได้เปิด
     transferLog: [],      // [{ type:'sent'|'received', amount, counterpart, date }]
   };
 }
@@ -166,14 +167,62 @@ function todayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function checkDailyLoginBonus() {
-  if (!state.data) return;
-  const today = todayKey();
-  if (state.data.lastLoginBonus === today) return; // รับไปแล้ววันนี้
-  state.data.lastLoginBonus = today;
+// เหลือเวลาอีกกี่ ms ก่อนจะกดรับโบนัสรายวันได้อีกครั้ง (<=0 แปลว่ากดรับได้เลย)
+function dailyBonusRemainingMs() {
+  if (!state.data) return Infinity;
+  const last = state.data.lastLoginBonusAt;
+  if (!last) return 0;
+  return DAILY_BONUS_COOLDOWN_MS - (Date.now() - last);
+}
+
+// ผู้ใช้ต้องกดปุ่มเองถึงจะได้รับ (ไม่ auto-grant ตอนล็อกอินแล้ว)
+// ข้อมูล lastLoginBonusAt/points/freeCases ถูกเก็บแยกตาม sub ของบัญชี Google
+// ที่ล็อกอินอยู่ (saveKey(state.user.sub)) จึงผูกกับอีเมลที่ล็อกอินเท่านั้นโดยธรรมชาติ
+function claimDailyBonus() {
+  if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะรับโบนัสรายวันได้'); return; }
+  const remaining = dailyBonusRemainingMs();
+  if (remaining > 0) { updateDailyBonusUI(); return; }
+
+  state.data.lastLoginBonusAt = Date.now();
   state.data.points += DAILY_LOGIN_BONUS;
+  state.data.freeCases = (state.data.freeCases || 0) + DAILY_LOGIN_FREE_CASES;
   persist();
-  setTimeout(() => alert(`🎁 โบนัสล็อกอินรายวัน: +${DAILY_LOGIN_BONUS} แต้ม!`), 50);
+  renderTopbar();
+  renderGachaTab();
+  updateDailyBonusUI();
+  alert(`🎁 รับโบนัสรายวันสำเร็จ! +${DAILY_LOGIN_BONUS} แต้ม และกล่องสุ่มฟรี ${DAILY_LOGIN_FREE_CASES} ใบ`);
+}
+
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function updateDailyBonusUI() {
+  const btn = document.getElementById('daily-bonus-btn');
+  const timerEl = document.getElementById('daily-bonus-timer');
+  if (!btn || !timerEl) return;
+
+  if (!state.user || !state.data) {
+    btn.disabled = true;
+    btn.textContent = 'รับโบนัสวันนี้';
+    timerEl.textContent = 'เข้าสู่ระบบก่อนถึงจะรับได้';
+    return;
+  }
+
+  const remaining = dailyBonusRemainingMs();
+  if (remaining <= 0) {
+    btn.disabled = false;
+    btn.textContent = `รับโบนัสวันนี้ (+${DAILY_LOGIN_BONUS} PT + กล่องฟรี ${DAILY_LOGIN_FREE_CASES})`;
+    timerEl.textContent = '🎁 พร้อมรับแล้ว!';
+  } else {
+    btn.disabled = true;
+    btn.textContent = 'รับแล้ว รอรอบถัดไป';
+    timerEl.textContent = `รับใหม่ได้ในอีก ${formatCountdown(remaining)}`;
+  }
 }
 
 function signOut() {
@@ -183,6 +232,7 @@ function signOut() {
   if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
   document.getElementById('app-shell').classList.add('signed-out');
   renderTopbar();
+  updateDailyBonusUI();
 }
 
 /* ---------------- data fetching (vlr.gg unofficial API) ---------------- */
@@ -371,11 +421,16 @@ function weightedPick(catalog) {
 
 function openCase() {
   if (!state.user) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะเปิดกล่องได้'); return; }
-  if (state.data.points < GACHA_COST) { alert('แต้มไม่พอ ต้องมีอย่างน้อย ' + GACHA_COST + ' แต้ม'); return; }
+  const freeAvailable = (state.data.freeCases || 0) > 0;
+  if (!freeAvailable && state.data.points < GACHA_COST) { alert('แต้มไม่พอ ต้องมีอย่างน้อย ' + GACHA_COST + ' แต้ม (หรือรอรับกล่องฟรีจากโบนัสรายวัน)'); return; }
 
   const pool = [...FRAME_CATALOG, ...THEME_CATALOG];
   const won = weightedPick(pool);
-  state.data.points -= GACHA_COST;
+  if (freeAvailable) {
+    state.data.freeCases -= 1;
+  } else {
+    state.data.points -= GACHA_COST;
+  }
 
   const isFrame = FRAME_CATALOG.includes(won);
   const ownedList = isFrame ? state.data.ownedFrames : state.data.ownedThemes;
@@ -384,12 +439,12 @@ function openCase() {
   else state.data.points += 15; // duplicate compensation
 
   persist();
-  playCaseAnimation(pool, won, alreadyOwned);
+  playCaseAnimation(pool, won, alreadyOwned, freeAvailable);
   renderGachaTab();
   renderTopbar();
 }
 
-function playCaseAnimation(pool, won, wasDuplicate) {
+function playCaseAnimation(pool, won, wasDuplicate, wasFree) {
   const track = document.getElementById('case-track');
   const overlay = document.getElementById('case-overlay');
   overlay.classList.add('open');
@@ -420,7 +475,8 @@ function playCaseAnimation(pool, won, wasDuplicate) {
 
   setTimeout(() => {
     document.getElementById('case-result-name').textContent = won.name;
-    document.getElementById('case-result-rarity').textContent = RARITY[won.rarity].label + (wasDuplicate ? ' • ได้ซ้ำ (+15 แต้มชดเชย)' : ' • ไอเทมใหม่!');
+    const freeTag = wasFree ? ' • ใช้กล่องฟรีจากโบนัสรายวัน' : '';
+    document.getElementById('case-result-rarity').textContent = RARITY[won.rarity].label + (wasDuplicate ? ' • ได้ซ้ำ (+15 แต้มชดเชย)' : ' • ไอเทมใหม่!') + freeTag;
     document.getElementById('case-result-rarity').style.color = RARITY[won.rarity].color;
     document.getElementById('case-result').classList.add('show');
   }, 3700);
@@ -661,6 +717,10 @@ function renderGachaTab() {
   if (!state.data) return;
   document.getElementById('gacha-points').textContent = state.data.points + ' PT';
   document.getElementById('gacha-cost').textContent = GACHA_COST;
+  const freeCases = state.data.freeCases || 0;
+  document.getElementById('gacha-free-cases').textContent = freeCases;
+  const openBtn = document.getElementById('open-case-btn');
+  if (openBtn) openBtn.textContent = freeCases > 0 ? `เปิดกล่อง (ฟรี × ${freeCases})` : 'เปิดกล่อง';
   document.getElementById('frame-grid').innerHTML = itemGridHtml(FRAME_CATALOG, state.data.ownedFrames, state.data.equippedFrame, 'frame');
   document.getElementById('theme-grid').innerHTML = itemGridHtml(THEME_CATALOG, state.data.ownedThemes, state.data.equippedTheme, 'theme');
 }
@@ -706,18 +766,19 @@ function switchTab(name) {
 
 function onSignedIn() {
   applyTheme(state.data.equippedTheme);
-  checkDailyLoginBonus();
   applyPendingTransfers();
   renderTopbar();
   renderPredictTab();
   renderGachaTab();
   renderProfileTab();
+  updateDailyBonusUI();
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   initGoogleSignIn();
   loadMatches();
   setInterval(loadMatches, 5 * 60 * 1000); // refresh every 5 min
+  setInterval(updateDailyBonusUI, 1000); // นับถอยหลังปุ่มรับโบนัสรายวันแบบเรียลไทม์
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('case-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'case-overlay') closeCaseOverlay();
