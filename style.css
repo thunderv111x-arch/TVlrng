@@ -367,13 +367,17 @@ body::before {
 
 /* Fullsense — original wordmark badge, no third-party logo assets used */
 .tag-fullsense {
-  background: linear-gradient(135deg, rgba(255,59,78,0.18), rgba(77,232,255,0.18));
-  border: 1px solid var(--accent-2); color: var(--text);
-  box-shadow: 0 0 10px rgba(77,232,255,0.25);
+  background: linear-gradient(135deg, rgba(255, 59, 78, 0.12), rgba(77, 232, 255, 0.12)),
+              url('IMG_0129-removebg-preview.png') no-repeat;
+  background-size: 24px 24px; /* ปรับขนาดโลโก้ */
+  background-position: calc(100% - 8px) center; /* จัดให้อยู่ฝั่งขวา */
+  border: 1px solid var(--accent-2); 
+  color: var(--text);
+  box-shadow: 0 0 10px rgba(77, 232, 255, 0.25);
+  padding-right: 36px !important; /* เพิ่มพื้นที่ฝั่งขวาไม่ให้ตัวหนังสือบังโลโก้ */
 }
 .tag-fullsense .profile-tag-name,
 .tag-fullsense .tag-preview-name { color: var(--accent-2); }
-
 /* ---------------- Responsive ---------------- */
 
 @media (max-width: 640px) {
