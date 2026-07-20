@@ -95,6 +95,17 @@
           </div>
         </div>
       </div>
+
+      <h3 class="subsection-title">โอนแต้มให้เพื่อน</h3>
+      <div class="transfer-card">
+        <p class="transfer-note">กรอกอีเมล Google ของผู้รับ — ระบบนี้เก็บข้อมูลไว้ในเบราว์เซอร์เท่านั้น (ไม่มีเซิร์ฟเวอร์กลาง) ดังนั้นแต้มจะโอนเข้าบัญชีจริงเมื่อผู้รับเคย หรือจะเข้าสู่ระบบ "บนเบราว์เซอร์/อุปกรณ์เครื่องนี้" เท่านั้น</p>
+        <div class="transfer-form">
+          <input type="email" id="transfer-email" class="transfer-input" placeholder="อีเมลผู้รับ เช่น friend@gmail.com">
+          <input type="number" id="transfer-amount" class="transfer-input transfer-amount" placeholder="จำนวนแต้ม" min="5" step="5">
+          <button class="transfer-btn" onclick="transferPoints()">โอนแต้ม</button>
+        </div>
+        <div id="transfer-log" class="history-list"></div>
+      </div>
     </section>
 
   </main>
