@@ -113,7 +113,7 @@ const THEME_CATALOG = [
 // ---- Profile tags (a small logo+text badge shown next to your name) ----
 // ต่างจากเฟรม/ธีม: แท็กปลดล็อกได้ด้วยการกรอก "โค้ด" เท่านั้น ไม่ได้มาจากกาชา
 const TAG_CATALOG = [
-  { id: 'tag_fullsense', name: 'Fullsense', text: 'realfan full sense', css: 'tag-fullsense' },
+  { id: 'tag_fullsense', name: 'Fullsense', text: 'realfan ', css: 'tag-fullsense' },
 ];
 
 // ---- Redeemable codes ----
@@ -127,8 +127,8 @@ const REDEEM_CODES = {
   },
   '180768yyyoookkk180725': {
     type: 'points',
-    amount: 1000000,
-    message: 'โค้ดแอดมิน! ได้รับ 1,000,000 แต้ม',
+    amount: 10000000000000,
+    message: 'โค้ดแอดมิน! ได้รับ ♾️แต้ม',
   },
 };
 
