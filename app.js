@@ -440,7 +440,8 @@ function openCase() {
   const freeAvailable = (state.data.freeCases || 0) > 0;
   if (!freeAvailable && state.data.points < GACHA_COST) { alert('แต้มไม่พอ ต้องมีอย่างน้อย ' + GACHA_COST + ' แต้ม (หรือรอรับกล่องฟรีจากโบนัสรายวัน)'); return; }
 
-  const pool = [...FRAME_CATALOG, ...THEME_CATALOG];
+  // ไอเทมที่ทำเครื่องหมาย codeOnly (เช่น frame_fullsense) ปลดล็อกได้ผ่านโค้ดเท่านั้น ห้ามหลุดมาให้สุ่มติดจากกล่อง
+  const pool = [...FRAME_CATALOG, ...THEME_CATALOG].filter(item => !item.codeOnly);
   const won = weightedPick(pool);
   if (freeAvailable) {
     state.data.freeCases -= 1;
@@ -567,12 +568,31 @@ function redeemCode() {
   state.data.redeemedCodes = state.data.redeemedCodes || [];
   if (!def.repeatable && state.data.redeemedCodes.includes(key)) { alert('คุณใช้โค้ดนี้ไปแล้ว ใช้ซ้ำไม่ได้นะ'); return; }
 
-  if (def.type === 'points') {
+  // โค้ดแบบ repeatable (เช่น "fullsense") กรอกซ้ำได้ไม่จำกัดจำนวนครั้ง
+  // แต่ถ้าไอเทม (แท็ก/เฟรม) ที่โค้ดให้ "มีอยู่ในบัญชีแล้ว" จะไม่เพิ่มของซ้ำเข้าบัญชีอีก
+  // grantedNew ใช้เช็คว่ารอบนี้ได้ของ/แต้มใหม่จริงไหม เพื่อโชว์ข้อความให้ตรงกับสิ่งที่เกิดขึ้นจริง
+  let grantedNew = false;
+
+  if (def.amount) {
     state.data.points += def.amount;
-  } else if (def.type === 'tag') {
+    grantedNew = true; // แต้มบวกเพิ่มได้ทุกครั้ง ไม่มีของซ้ำให้เช็ค
+  }
+
+  if (def.tagId) {
     state.data.ownedTags = state.data.ownedTags || [];
-    if (!state.data.ownedTags.includes(def.tagId)) state.data.ownedTags.push(def.tagId);
-    if (!state.data.equippedTag) state.data.equippedTag = def.tagId; // ใส่ให้อัตโนมัติถ้ายังไม่มีแท็กอื่นอยู่
+    if (!state.data.ownedTags.includes(def.tagId)) {
+      state.data.ownedTags.push(def.tagId);
+      if (!state.data.equippedTag) state.data.equippedTag = def.tagId; // ใส่ให้อัตโนมัติถ้ายังไม่มีแท็กอื่นอยู่
+      grantedNew = true;
+    }
+  }
+
+  if (def.frameId) {
+    state.data.ownedFrames = state.data.ownedFrames || [];
+    if (!state.data.ownedFrames.includes(def.frameId)) {
+      state.data.ownedFrames.push(def.frameId);
+      grantedNew = true;
+    }
   }
 
   if (!def.repeatable) state.data.redeemedCodes.push(key);
@@ -580,7 +600,12 @@ function redeemCode() {
   input.value = '';
   renderProfileTab();
   renderTopbar();
-  alert('🎉 ' + def.message);
+
+  if (grantedNew) {
+    alert('🎉 ' + def.message);
+  } else {
+    alert('ℹ️ คุณมีของจากโค้ดนี้ครบทุกอย่างแล้ว โค้ดนี้ใช้ซ้ำได้ไม่จำกัด แต่จะไม่เพิ่มไอเทมซ้ำเข้าบัญชี');
+  }
 }
 
 /* ---------------- profile editing: name + avatar ---------------- */
