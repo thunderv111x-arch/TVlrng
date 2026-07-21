@@ -171,6 +171,26 @@ body::before {
 .bet-input:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
 .bet-unit { flex-shrink: 0; color: var(--accent-2); }
 
+.allin-btn {
+  flex-shrink: 0; background: var(--accent); color: var(--bg); border: 1px solid var(--accent);
+  padding: 6px 10px; border-radius: 2px; font-family: 'Share Tech Mono', monospace; font-size: 11px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .05em; cursor: pointer;
+}
+.allin-btn:hover { filter: brightness(1.1); }
+.allin-btn:active { transform: translateY(1px); }
+
+.score-picker {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px;
+  font-size: 12px; color: var(--text-dim); font-family: 'Share Tech Mono', monospace;
+}
+.score-picker label { flex-shrink: 0; }
+.score-select {
+  background: var(--bg-panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 6px 8px; border-radius: 2px; font-family: 'Share Tech Mono', monospace; font-size: 12px;
+}
+.score-select:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+.score-hint { flex-basis: 100%; color: var(--accent-2); font-size: 10.5px; opacity: .85; }
+
 .match-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12px; color: var(--text-dim); font-family: 'Share Tech Mono', monospace; }
 .bet-hint { color: var(--text-dim); }
 .bet-hint-warn { color: var(--accent); }
