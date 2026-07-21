@@ -106,6 +106,21 @@
         </div>
       </div>
 
+      <h3 class="subsection-title">แก้ไขโปรไฟล์</h3>
+      <div class="redeem-card">
+        <p class="redeem-note">เปลี่ยนชื่อและรูปที่แสดงบนเว็บนี้ได้เอง (ไม่กระทบบัญชี Google จริงของคุณ ใช้แสดงบนเว็บนี้เท่านั้น)</p>
+        <div class="redeem-form">
+          <input type="text" id="edit-name-input" class="redeem-input" placeholder="ชื่อที่จะแสดง" maxlength="40" autocomplete="off">
+          <button class="redeem-btn" onclick="updateDisplayName()">บันทึกชื่อ</button>
+          <button class="redeem-btn" onclick="resetDisplayName()" title="ใช้ชื่อ Google เดิม">รีเซ็ตชื่อ</button>
+        </div>
+        <div class="redeem-form">
+          <input type="text" id="edit-avatar-input" class="redeem-input" placeholder="ลิงก์รูปโปรไฟล์ (URL)" autocomplete="off">
+          <button class="redeem-btn" onclick="updateAvatar()">บันทึกรูป</button>
+          <button class="redeem-btn" onclick="resetAvatar()" title="ใช้รูป Google เดิม">รีเซ็ตรูป</button>
+        </div>
+      </div>
+
       <h3 class="subsection-title">กรอกโค้ด</h3>
       <div class="redeem-card">
         <p class="redeem-note">มีโค้ดพิเศษ? กรอกที่นี่เพื่อรับรางวัล — โค้ดแต่ละอันใช้ได้ครั้งเดียวต่อบัญชี</p>
