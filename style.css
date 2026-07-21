@@ -274,8 +274,19 @@ body::before {
 .frame-ascendant { border: 3px solid #E8B93B; box-shadow: 0 0 24px rgba(232,185,59,0.55); }
 .frame-radiant   { border: 3px solid transparent; background: conic-gradient(from 0deg, var(--accent), #E8B93B, var(--accent-2), var(--accent)); animation: radiant-spin 4s linear infinite; }
 
+/* frame_fullsense: ปลดล็อกจากโค้ดเท่านั้น (ไม่หลุดจากกาชา) — โทนสีเดียวกับ tag-fullsense */
+.frame-fullsense {
+  border: 3px solid transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2), var(--accent));
+  animation: fullsense-glow 2.6s ease-in-out infinite;
+}
+
 @keyframes phantom-pulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
 @keyframes radiant-spin { to { filter: hue-rotate(360deg); } }
+@keyframes fullsense-glow {
+  0%, 100% { box-shadow: 0 0 14px rgba(77,232,255,0.35), 0 0 8px rgba(255,59,78,0.25); }
+  50%      { box-shadow: 0 0 26px rgba(77,232,255,0.6),  0 0 16px rgba(255,59,78,0.45); }
+}
 
 .profile-name { font-size: 24px; margin: 0 0 4px; }
 .profile-points { font-family: 'Share Tech Mono', monospace; color: var(--accent-2); margin: 0 0 16px; }
