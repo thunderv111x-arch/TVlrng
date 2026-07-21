@@ -42,6 +42,17 @@ const state = {
 
 function saveKey(sub) { return `valo_predict_user_${sub}`; }
 
+// ชื่อ/รูปที่ "แสดงจริง" บนเว็บ — ถ้าผู้ใช้ตั้งค่าเองไว้ (customName/customAvatar) จะใช้ค่านั้นแทนของ Google
+function displayName() {
+  if (!state.user) return '';
+  return (state.data && state.data.customName) || state.user.name;
+}
+
+function displayAvatar() {
+  if (!state.user) return '';
+  return (state.data && state.data.customAvatar) || state.user.picture;
+}
+
 function defaultUserData() {
   return {
     points: 100, // starter points
@@ -57,6 +68,8 @@ function defaultUserData() {
     lastLoginBonusAt: null, // timestamp (ms) ครั้งล่าสุดที่ "กดรับ" โบนัสรายวัน (รีทุก 24 ชม. นับจากเวลานี้)
     freeCases: 0,           // จำนวนกล่องสุ่มฟรีที่ได้จากโบนัสรายวัน ยังไม่ได้เปิด
     transferLog: [],      // [{ type:'sent'|'received', amount, counterpart, date }]
+    customName: null,     // ชื่อที่ผู้ใช้ตั้งเอง (overrides ชื่อจาก Google) — null = ใช้ชื่อ Google ตามปกติ
+    customAvatar: null,   // URL รูปโปรไฟล์ที่ผู้ใช้ตั้งเอง (overrides รูปจาก Google) — null = ใช้รูป Google ตามปกติ
   };
 }
 
@@ -552,7 +565,7 @@ function redeemCode() {
   if (!def) { alert('โค้ดนี้ไม่ถูกต้อง หรือไม่มีอยู่จริง'); return; }
 
   state.data.redeemedCodes = state.data.redeemedCodes || [];
-  if (state.data.redeemedCodes.includes(key)) { alert('คุณใช้โค้ดนี้ไปแล้ว ใช้ซ้ำไม่ได้นะ'); return; }
+  if (!def.repeatable && state.data.redeemedCodes.includes(key)) { alert('คุณใช้โค้ดนี้ไปแล้ว ใช้ซ้ำไม่ได้นะ'); return; }
 
   if (def.type === 'points') {
     state.data.points += def.amount;
@@ -562,12 +575,56 @@ function redeemCode() {
     if (!state.data.equippedTag) state.data.equippedTag = def.tagId; // ใส่ให้อัตโนมัติถ้ายังไม่มีแท็กอื่นอยู่
   }
 
-  state.data.redeemedCodes.push(key);
+  if (!def.repeatable) state.data.redeemedCodes.push(key);
   persist();
   input.value = '';
   renderProfileTab();
   renderTopbar();
   alert('🎉 ' + def.message);
+}
+
+/* ---------------- profile editing: name + avatar ---------------- */
+
+function updateDisplayName() {
+  if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อน'); return; }
+  const input = document.getElementById('edit-name-input');
+  const val = (input.value || '').trim();
+  if (!val) { alert('กรอกชื่อก่อนสิ'); return; }
+  if (val.length > 40) { alert('ชื่อยาวเกินไป (สูงสุด 40 ตัวอักษร)'); return; }
+  state.data.customName = val;
+  persist();
+  renderTopbar();
+  renderProfileTab();
+  alert('✅ เปลี่ยนชื่อโปรไฟล์สำเร็จ');
+}
+
+function resetDisplayName() {
+  if (!state.user || !state.data) return;
+  state.data.customName = null;
+  persist();
+  renderTopbar();
+  renderProfileTab();
+}
+
+function updateAvatar() {
+  if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อน'); return; }
+  const input = document.getElementById('edit-avatar-input');
+  const val = (input.value || '').trim();
+  if (!val) { alert('กรอกลิงก์รูปก่อนสิ'); return; }
+  try { new URL(val); } catch (e) { alert('ลิงก์รูปไม่ถูกต้อง'); return; }
+  state.data.customAvatar = val;
+  persist();
+  renderTopbar();
+  renderProfileTab();
+  alert('✅ เปลี่ยนรูปโปรไฟล์สำเร็จ');
+}
+
+function resetAvatar() {
+  if (!state.user || !state.data) return;
+  state.data.customAvatar = null;
+  persist();
+  renderTopbar();
+  renderProfileTab();
 }
 
 /* ---------------- profile tags ---------------- */
@@ -636,8 +693,8 @@ function renderTopbar() {
   document.getElementById('g_signin_btn').style.display = signedIn ? 'none' : 'inline-block';
   document.getElementById('user-box').style.display = signedIn ? 'flex' : 'none';
   if (signedIn) {
-    document.getElementById('user-avatar').src = state.user.picture;
-    document.getElementById('user-name').textContent = state.user.name;
+    document.getElementById('user-avatar').src = displayAvatar();
+    document.getElementById('user-name').textContent = displayName();
     document.getElementById('user-points').textContent = state.data.points + ' PT';
   }
 }
@@ -800,9 +857,9 @@ function renderGachaTab() {
 function renderProfileTab() {
   if (!state.user || !state.data) return;
   const frame = FRAME_CATALOG.find(f => f.id === state.data.equippedFrame) || FRAME_CATALOG[0];
-  document.getElementById('profile-avatar').src = state.user.picture;
+  document.getElementById('profile-avatar').src = displayAvatar();
   document.getElementById('profile-avatar-wrap').className = 'profile-avatar-wrap ' + frame.css;
-  document.getElementById('profile-name').textContent = state.user.name;
+  document.getElementById('profile-name').textContent = displayName();
   document.getElementById('profile-points').textContent = state.data.points + ' PT';
   const { total, correct } = state.data.stats;
   document.getElementById('profile-total').textContent = total;
@@ -820,6 +877,11 @@ function renderProfileTab() {
     tagBadge.innerHTML = '';
   }
   renderTagGrid();
+
+  const nameInput = document.getElementById('edit-name-input');
+  if (nameInput && document.activeElement !== nameInput) nameInput.value = state.data.customName || '';
+  const avatarInput = document.getElementById('edit-avatar-input');
+  if (avatarInput && document.activeElement !== avatarInput) avatarInput.value = state.data.customAvatar || '';
 
   renderTransferLog();
   renderGachaTab();
