@@ -366,6 +366,16 @@ async function loadMatches() {
 
 /* ---------------- prediction resolution ---------------- */
 
+// สกอร์จริงของแมตช์ในรูปแบบ "2-0" / "2-1" นับจากมุมมองของ pick (ทีมที่ผู้เล่นทาย)
+// คืนค่า null ถ้าตัดสินสกอร์แบบ BO3 ไม่ได้ (เช่น ผลรวมไม่ใช่ 3 เกม อย่าง BO5)
+function bo3ScoreFromPickPerspective(s1, s2, pick) {
+  const total = s1 + s2;
+  if (total !== 3) return null; // ไม่ใช่ผล BO3 (2-0 หรือ 2-1) ตัดสินสกอร์ไม่ได้
+  const pickScore = pick === 'team1' ? s1 : s2;
+  const oppScore = pick === 'team1' ? s2 : s1;
+  return `${pickScore}-${oppScore}`;
+}
+
 function resolvePendingPredictions() {
   if (!state.data) return;
   let changed = false;
@@ -386,7 +396,30 @@ function resolvePendingPredictions() {
     pred.correct = winner === pred.pick;
     state.data.stats.total += 1;
     const bet = pred.bet || BET_COST;
-    if (pred.correct) {
+
+    // โหมดทายสกอร์ BO3: pred.predictedScore เป็น "2-0" หรือ "2-1" (มุมมองทีมที่ pick ไว้ว่าจะชนะ)
+    const actualScoreFromPickView = bo3ScoreFromPickPerspective(s1, s2, pred.pick);
+    let outcome; // 'score_exact' | 'score_mirror' | 'normal'
+    if (pred.predictedScore && actualScoreFromPickView) {
+      if (pred.correct && pred.predictedScore === actualScoreFromPickView) {
+        outcome = 'score_exact'; // ทายทีมถูก และสกอร์ตรงเป๊ะ
+      } else if (!pred.correct && pred.predictedScore === actualScoreFromPickView) {
+        outcome = 'score_mirror'; // ทายทีมผิด (แพ้แทนที่จะชนะ) แต่สกอร์ตรงกับที่ทายไว้แบบสลับข้าง
+      } else {
+        outcome = 'normal';
+      }
+    } else {
+      outcome = 'normal';
+    }
+
+    if (outcome === 'score_exact') {
+      state.data.stats.correct += 1;
+      pred.reward = Math.round(bet * SCORE_WIN_MULTIPLIER); // ทายสกอร์ถูกเป๊ะ -> x3
+      state.data.points += pred.reward;
+    } else if (outcome === 'score_mirror') {
+      pred.reward = Math.round(bet * SCORE_MIRROR_REFUND_RATE); // สกอร์ตรงแต่ทายทีมผิด -> คืน 50%
+      state.data.points += pred.reward;
+    } else if (pred.correct) {
       state.data.stats.correct += 1;
       pred.reward = Math.round(bet * WIN_PAYOUT_MULTIPLIER);
       state.data.points += pred.reward;
@@ -404,22 +437,33 @@ function resolvePendingPredictions() {
 
 /* ---------------- predicting ---------------- */
 
-function makePrediction(matchKey, pick, team1, team2, event, rawBet) {
+function makePrediction(matchKey, pick, team1, team2, event, rawBet, rawScorePick) {
   if (!state.user) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะทายผลได้'); return; }
   if (state.data.predictions[matchKey]) return; // already predicted
 
   let bet = parseInt(rawBet, 10);
   if (isNaN(bet)) bet = BET_COST;
-  bet = Math.max(MIN_BET, Math.min(MAX_BET, bet));
+  // ไม่มีเพดานบนอีกต่อไป (MAX_BET = Infinity) เดิมพันได้สูงสุดเท่าที่มีแต้ม (รองรับ ALL IN)
+  bet = Math.max(MIN_BET, Math.min(MAX_BET, bet, state.data.points));
 
   if (state.data.points < bet) { alert(`แต้มไม่พอสำหรับเดิมพัน ${bet} แต้ม (มีอยู่ ${state.data.points})`); return; }
   if (state.data.points < MIN_BET) { alert(`แต้มไม่พอสำหรับเดิมพันขั้นต่ำ ${MIN_BET} แต้ม (มีอยู่ ${state.data.points})`); return; }
 
+  // ทายสกอร์ BO3 (ตัวเลือกเสริม): '2-0' | '2-1' | '' (ไม่ทายสกอร์)
+  const predictedScore = (rawScorePick === '2-0' || rawScorePick === '2-1') ? rawScorePick : null;
+
   state.data.points -= bet;
-  state.data.predictions[matchKey] = { pick, team1, team2, event, bet, resolved: false, correct: null, reward: null };
+  state.data.predictions[matchKey] = { pick, team1, team2, event, bet, predictedScore, resolved: false, correct: null, reward: null };
   persist();
   renderPredictTab();
   renderTopbar();
+}
+
+// ผู้เล่นกด ALL IN เพื่อเดิมพันแต้มทั้งหมดที่มี (เติมค่าลงช่องกรอกเดิมพันให้)
+function setAllIn(betInputId) {
+  const input = document.getElementById(betInputId);
+  if (!input || !state.data) return;
+  input.value = state.data.points;
 }
 
 /* ---------------- gacha ---------------- */
@@ -737,16 +781,31 @@ function matchCardHtml(match, kind) {
   const points = state.data ? state.data.points : 0;
   const canAfford = state.data ? points >= MIN_BET : true;
   const betInputId = safeDomId(key);
-  const maxBettable = Math.max(MIN_BET, Math.min(MAX_BET, points));
+  const scoreSelectId = betInputId + '_score';
+  // ไม่มีเพดานบนแล้ว (MAX_BET = Infinity) เดิมพันสูงสุดได้เท่ากับแต้มที่มีอยู่ (รองรับ ALL IN)
+  const maxBettable = Math.max(MIN_BET, points);
   const defaultBet = Math.min(BET_COST, maxBettable);
 
   let statusBadge = '';
   if (pred && pred.resolved) {
-    statusBadge = pred.correct
-      ? `<span class="badge badge-correct">ทายถูก +${pred.reward}</span>`
-      : `<span class="badge badge-wrong">ทายพลาด +${pred.reward} (คืน 25%)</span>`;
+    if (pred.predictedScore) {
+      if (pred.correct && pred.reward >= pred.bet) {
+        statusBadge = `<span class="badge badge-correct">ทายสกอร์ถูกเป๊ะ (${pred.predictedScore}) +${pred.reward}</span>`;
+      } else if (!pred.correct && pred.reward === Math.round(pred.bet * SCORE_MIRROR_REFUND_RATE)) {
+        statusBadge = `<span class="badge badge-wrong">สกอร์ตรงแต่ทายทีมผิด +${pred.reward} (คืน 50%)</span>`;
+      } else if (pred.correct) {
+        statusBadge = `<span class="badge badge-correct">ทายทีมถูก (สกอร์ไม่ตรง) +${pred.reward}</span>`;
+      } else {
+        statusBadge = `<span class="badge badge-wrong">ทายพลาด +${pred.reward} (คืน 25%)</span>`;
+      }
+    } else {
+      statusBadge = pred.correct
+        ? `<span class="badge badge-correct">ทายถูก +${pred.reward}</span>`
+        : `<span class="badge badge-wrong">ทายพลาด +${pred.reward} (คืน 25%)</span>`;
+    }
   } else if (pred) {
-    statusBadge = `<span class="badge badge-pending">เดิมพัน ${pred.bet} PT · รอผล</span>`;
+    const scoreNote = pred.predictedScore ? ` · ทายสกอร์ ${pred.predictedScore}` : '';
+    statusBadge = `<span class="badge badge-pending">เดิมพัน ${pred.bet} PT${scoreNote} · รอผล</span>`;
   }
 
   const logo1 = match.team1_logo || PLACEHOLDER_LOGO;
@@ -758,9 +817,20 @@ function matchCardHtml(match, kind) {
       <input type="number" id="${betInputId}" class="bet-input"
         min="${MIN_BET}" max="${maxBettable}" step="5" value="${defaultBet}">
       <span class="bet-unit">PT</span>
+      <button type="button" class="allin-btn" title="เดิมพันแต้มทั้งหมดที่มี" onclick="setAllIn('${betInputId}')">ALL IN</button>
+    </div>
+    <div class="score-picker">
+      <label for="${scoreSelectId}">ทายสกอร์ BO3 (ไม่บังคับ):</label>
+      <select id="${scoreSelectId}" class="score-select">
+        <option value="">ไม่ทายสกอร์ (เดิมพันปกติ)</option>
+        <option value="2-0">ชนะ 2-0</option>
+        <option value="2-1">ชนะ 2-1</option>
+      </select>
+      <span class="score-hint">ทายทีม+สกอร์ถูกเป๊ะ = x${SCORE_WIN_MULTIPLIER} · สกอร์ตรงแต่ทายทีมผิด = คืน ${Math.round(SCORE_MIRROR_REFUND_RATE * 100)}%</span>
     </div>` : '';
 
   const getBetJs = `document.getElementById('${betInputId}').value`;
+  const getScoreJs = `document.getElementById('${scoreSelectId}').value`;
 
   return `
   <div class="match-card">
@@ -770,13 +840,13 @@ function matchCardHtml(match, kind) {
     </div>
     <div class="match-teams">
       <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
-        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs})">
+        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
         <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
         <span class="team-name">${match.team1}</span>
       </button>
       <span class="vs">VS</span>
       <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
-        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs})">
+        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
         <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
         <span class="team-name">${match.team2}</span>
       </button>
@@ -845,7 +915,7 @@ function renderPredictTab() {
     historyEl.innerHTML = entries.slice().reverse().map(([key, p]) => `
       <div class="history-row">
         <span>${p.team1} vs ${p.team2}</span>
-        <span class="history-pick">ทาย: ${p.pick === 'team1' ? p.team1 : p.team2} · เดิมพัน ${p.bet ?? BET_COST} PT</span>
+        <span class="history-pick">ทาย: ${p.pick === 'team1' ? p.team1 : p.team2} · เดิมพัน ${p.bet ?? BET_COST} PT${p.predictedScore ? ` · สกอร์ ${p.predictedScore}` : ''}</span>
         <span>${p.resolved ? (p.correct ? `<span class="badge badge-correct">ถูก +${p.reward}</span>` : `<span class="badge badge-wrong">ผิด +${p.reward}</span>`) : '<span class="badge badge-pending">รอผล</span>'}</span>
       </div>`).join('');
   }
