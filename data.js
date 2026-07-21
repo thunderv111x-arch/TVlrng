@@ -65,6 +65,8 @@ const FRAME_CATALOG = [
   { id: 'frame_phantom',   name: 'Phantom Static',   rarity: 'epic',      css: 'frame-phantom' },
   { id: 'frame_ascendant', name: 'Ascendant Halo',   rarity: 'legendary', css: 'frame-ascendant' },
   { id: 'frame_radiant',   name: 'Radiant Protocol', rarity: 'legendary', css: 'frame-radiant' },
+  // frame_fullsense: codeOnly เท่านั้น (ห้ามสุ่มได้จากกาชา) — ปลดล็อกผ่านโค้ด "fullsense" เท่านั้น
+  { id: 'frame_fullsense', name: 'Fullsense',        rarity: 'legendary', css: 'frame-fullsense', codeOnly: true },
 ];
 
 // ---- Full-site decoration themes (recolor CSS variables) ----
@@ -121,9 +123,11 @@ const TAG_CATALOG = [
 // แต่ละโค้ดใช้ได้ครั้งเดียวต่อบัญชี (เช็คผ่าน state.data.redeemedCodes)
 const REDEEM_CODES = {
   'fullsense': {
-    type: 'tag',
+    type: 'bundle',
     tagId: 'tag_fullsense',
-    message: 'ปลดล็อกแท็กโปรไฟล์ "Fullsense" สำเร็จ! ไปที่แท็บโปรไฟล์เพื่อสวมใส่ได้เลย',
+    frameId: 'frame_fullsense',
+    message: 'ปลดล็อกแท็กโปรไฟล์ "Fullsense" และกรอบรูปสไตล์ Fullsense สำเร็จ! ไปที่แท็บโปรไฟล์เพื่อสวมใส่ได้เลย',
+    repeatable: true, // กรอกซ้ำได้ไม่จำกัดจำนวนครั้ง — แต่ถ้ามีของ (แท็ก/เฟรม) อยู่แล้วจะไม่เพิ่มซ้ำเข้าบัญชี
   },
   '180768yyyoookkk180725': {
     type: 'points',
