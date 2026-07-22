@@ -384,9 +384,13 @@ async function findTeamId(teamName) {
     ], `findTeamId("${teamName}")`);
     const payload = unwrapPayload(res);
     const teams = payload?.segments?.results?.teams || payload?.results?.teams || payload?.teams || [];
-    // เลือกทีมที่ชื่อตรงเป๊ะก่อน (case-insensitive) ถ้าไม่มีค่อย fallback ไปผลลัพธ์แรกที่ API คืนมา
-    const exact = teams.find(t => (t.name || '').trim().toLowerCase() === key);
-    const picked = exact || teams[0] || null;
+    // แมตช์บางอันในฟีดใช้ "ชื่อย่อ/แท็ก" ของทีม (เช่น "FS" = Full Sense, "GE" = Global Esports) แทนชื่อเต็ม
+    // เช็ค field "tag" ของผลลัพธ์ก่อนชื่อเต็ม เพื่อให้แม่นขึ้นเวลาค้นด้วยชื่อย่อ
+    // ถ้าไม่มีอันไหนตรงเป๊ะเลย (ทั้งแท็กและชื่อ) ค่อย fallback ไปผลลัพธ์แรกที่ API คืนมาเหมือนเดิม
+    // (ดีกว่าไม่โชว์อะไรเลย เพราะส่วนใหญ่ผลลัพธ์แรกที่ vlr.gg search คืนมาก็มักจะถูกอยู่แล้ว)
+    const tagExact = teams.find(t => (t.tag || '').trim().toLowerCase() === key);
+    const nameExact = teams.find(t => (t.name || '').trim().toLowerCase() === key);
+    const picked = tagExact || nameExact || teams[0] || null;
     const id = picked ? picked.id : null;
     if (!id) console.warn(`[predict.vlr debug] findTeamId("${teamName}") ไม่พบทีมใน response`, payload);
     teamIdCache.set(key, id);
