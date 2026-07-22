@@ -50,12 +50,52 @@ const state = {
   results: [],
   usingFallback: false,
   leagueFilter: localStorage.getItem(LEAGUE_FILTER_STORAGE_KEY) || 'all', // ตัวกรองลีก (global ไม่ผูกกับ user)
+  finishedLive: loadFinishedLiveCache(), // แมตช์ที่เพิ่งจบ จาก live_score — คีย์ = match_page, ค่า = { match, finishedAt }
 };
+
+// ล้างรายการที่จบไปเกิน 24 ชม. ทิ้งตั้งแต่ตอนโหลดหน้าเว็บ (เผื่อไม่มีใครเปิดเว็บทิ้งไว้ให้ poll ลบเอง)
+pruneFinishedLive(state.finishedLive);
+saveFinishedLiveCache(state.finishedLive);
 
 // ---- Live score polling ----
 // vlrggapi เอง cache endpoint q=live_score ไว้แค่ 30 วิ (ดู README) เลย poll ถี่กว่า loadMatches()
 // (ซึ่งดึง upcoming/results หนักกว่าและ cache 5 นาที) แยกกันเพื่อไม่ต้องยิงทุกอย่างซ้ำทุก 30 วิ
 const LIVE_POLL_MS = 30 * 1000;
+
+// ---- แมตช์ที่เพิ่งจบ (จาก live_score) ----
+// เดิม endpoint live_score พอแมตช์จบ (ตกจาก list) หน้าเว็บจะทำให้การ์ดหายวับไปทันที ทำให้พลาดดูสกอร์สุดท้าย
+// แก้โดย snapshot รายการที่ไลฟ์อยู่ทุกรอบไว้ใน localStorage เทียบกับรอบก่อน ถ้าแมตช์ไหนหลุดจาก live_score
+// ไปแล้ว ให้เก็บสกอร์สุดท้ายไว้โชว์ต่อ (badge "จบแล้ว" แทน "LIVE") จนกว่าจะครบ 24 ชม. นับจากจบ ค่อยลบทิ้ง
+// เก็บไว้ใน localStorage ด้วย (ไม่ใช่แค่ state ใน memory) เพื่อให้รอดแม้ผู้ใช้รีเฟรช/ปิดเปิดหน้าเว็บใหม่
+const FINISHED_LIVE_KEY = 'valo_predict_finished_live';
+const LIVE_SNAPSHOT_KEY = 'valo_predict_live_snapshot';
+const FINISHED_LIVE_TTL_MS = 24 * 60 * 60 * 1000; // โชว์ผลที่เพิ่งจบต่อ 24 ชม. ก่อนลบ
+
+function loadFinishedLiveCache() {
+  try {
+    const raw = localStorage.getItem(FINISHED_LIVE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveFinishedLiveCache(cache) {
+  try { localStorage.setItem(FINISHED_LIVE_KEY, JSON.stringify(cache)); } catch (e) {}
+}
+function loadLiveSnapshot() {
+  try {
+    const raw = localStorage.getItem(LIVE_SNAPSHOT_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveLiveSnapshot(map) {
+  try { localStorage.setItem(LIVE_SNAPSHOT_KEY, JSON.stringify(map)); } catch (e) {}
+}
+// ลบรายการที่จบเกิน 24 ชม. ออกจาก cache (mutate ตรงๆ)
+function pruneFinishedLive(cache) {
+  const now = Date.now();
+  Object.keys(cache).forEach(key => {
+    if (now - cache[key].finishedAt > FINISHED_LIVE_TTL_MS) delete cache[key];
+  });
+}
 
 /* ---------------- storage helpers ---------------- */
 
@@ -514,6 +554,20 @@ function closeTeamInfo() {
   switchTab(teamInfoPreviousTab);
 }
 
+// ---- แปลงเวลาแข่งจาก API เป็น Date object ใช้เทียบเวลาปิดรับเดิมพัน (BET_CUTOFF_MS) ----
+// vlrggapi field ชื่อ "unix_timestamp" แต่บางเวอร์ชันส่งเป็นตัวเลข epoch วินาทีจริงๆ
+// บางเวอร์ชันส่งเป็นสตริงวันที่ "YYYY-MM-DD HH:mm:ss" (ถือว่าเป็น UTC) เลยรองรับทั้งสองแบบ
+function parseMatchTimestamp(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d+$/.test(s)) {
+    const d = new Date(Number(s) * 1000);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function normalizeMatch(m, logoMap) {
   const tournamentName = m.match_event || '';
   const lookupLogo = name => (logoMap && logoMap.get((name || '').trim().toLowerCase())) || PLACEHOLDER_LOGO;
@@ -525,6 +579,7 @@ function normalizeMatch(m, logoMap) {
     match_event: tournamentName,
     match_series: m.match_series || '',
     time_until_match: m.time_until_match || '',
+    match_time: parseMatchTimestamp(m.unix_timestamp), // ใช้เช็คปิดรับเดิมพันก่อนแข่งเริ่ม
     match_page: m.match_page || `${m.team1}-${m.team2}-${m.time_until_match}`,
     category: classifyTournament(tournamentName),
   };
@@ -550,6 +605,17 @@ function normalizeResult(r, logoMap) {
 // ---- แมตช์สด (q=live_score) ----
 // endpoint นี้ต่างจาก upcoming/results ตรงที่ส่ง team1_logo/team2_logo มาให้ตรงๆ อยู่แล้ว
 // (ไม่ต้องพึ่ง logoMap จาก /rankings) แต่ใส่ fallback ไว้เผื่อบางแมตช์ไม่มีโลโก้ติดมา
+
+// บาง instance ของ vlrggapi (self-host) ถ้า scraper ฝั่ง backend ดึงข้อมูลแมพ/ราวด์จากหน้า vlr.gg
+// ไม่สำเร็จ (เช่นโครงสร้างหน้าเปลี่ยน หรือแมตช์นั้นยังไม่เริ่มจริงๆ) จะส่ง string literal เช่น
+// "Unknown" หรือ "N/A" กลับมาแทนที่จะเป็นค่าว่าง ถ้าไม่กรองทิ้งจะโชว์ทะลุขึ้นหน้าเว็บเป็นข้อความมั่วๆ
+// (เช่น "Unknown · แมพที่ Unknown", "CT N/A / T N/A") ฟังก์ชันนี้แปลง placeholder พวกนี้ให้เป็นค่าว่าง
+const LIVE_PLACEHOLDER_VALUES = new Set(['unknown', 'n/a', 'na', 'tbd', '-', '--', 'null', 'undefined']);
+function cleanLiveField(value) {
+  const s = (value ?? '').toString().trim();
+  return LIVE_PLACEHOLDER_VALUES.has(s.toLowerCase()) ? '' : s;
+}
+
 function normalizeLiveMatch(m, logoMap) {
   const tournamentName = m.match_event || '';
   const lookupLogo = name => (logoMap && logoMap.get((name || '').trim().toLowerCase())) || PLACEHOLDER_LOGO;
@@ -560,12 +626,12 @@ function normalizeLiveMatch(m, logoMap) {
     team2_logo: m.team2_logo || lookupLogo(m.team2),
     score1: m.score1 ?? '0',
     score2: m.score2 ?? '0',
-    team1_round_ct: m.team1_round_ct || '',
-    team1_round_t: m.team1_round_t || '',
-    team2_round_ct: m.team2_round_ct || '',
-    team2_round_t: m.team2_round_t || '',
-    map_number: m.map_number || '',
-    current_map: m.current_map || '',
+    team1_round_ct: cleanLiveField(m.team1_round_ct),
+    team1_round_t: cleanLiveField(m.team1_round_t),
+    team2_round_ct: cleanLiveField(m.team2_round_ct),
+    team2_round_t: cleanLiveField(m.team2_round_t),
+    map_number: cleanLiveField(m.map_number),
+    current_map: cleanLiveField(m.current_map),
     match_event: tournamentName,
     match_series: m.match_series || '',
     match_page: m.match_page || `${m.team1}-${m.team2}-live`,
@@ -623,7 +689,29 @@ async function loadLiveScores() {
     const logoMap = await buildLogoMap(); // ใช้แคชเดิมถ้ายังไม่หมดอายุ ไม่ยิงซ้ำ
     const liveRes = await fetchWithTimeout(`${API_BASE}/match?q=live_score`, FETCH_TIMEOUT_MS);
     const rawLive = liveRes?.data?.segments || [];
-    state.live = rawLive.map(m => normalizeLiveMatch(m, logoMap));
+    const newLive = rawLive.map(m => normalizeLiveMatch(m, logoMap));
+    const newLiveKeys = new Set(newLive.map(m => m.match_page));
+
+    // เทียบกับ snapshot รอบก่อน (เก็บไว้ใน localStorage): แมตช์ไหนเคยอยู่ใน live_score
+    // แต่รอบนี้หลุดไปแล้ว = เพิ่งจบ ให้เก็บสกอร์สุดท้ายไว้โชว์ต่อ (ตั้งเวลาจบครั้งแรกเท่านั้น ไม่รีเซ็ตซ้ำ)
+    const prevSnapshot = loadLiveSnapshot();
+    Object.keys(prevSnapshot).forEach(key => {
+      if (!newLiveKeys.has(key) && !state.finishedLive[key]) {
+        state.finishedLive[key] = { match: prevSnapshot[key], finishedAt: Date.now() };
+      }
+    });
+    // ถ้าแมตช์กลับมาไลฟ์อีก (API แกว่ง/รีสตาร์ทแมพ) เอาออกจากรายการ "จบแล้ว"
+    newLiveKeys.forEach(key => { delete state.finishedLive[key]; });
+
+    pruneFinishedLive(state.finishedLive); // ลบรายการที่จบเกิน 24 ชม. ทิ้ง
+    saveFinishedLiveCache(state.finishedLive);
+
+    // เก็บ snapshot ของไลฟ์ตอนนี้ไว้เทียบรอบถัดไป (คีย์ตาม match_page)
+    const snapshotMap = {};
+    newLive.forEach(m => { snapshotMap[m.match_page] = m; });
+    saveLiveSnapshot(snapshotMap);
+
+    state.live = newLive;
     console.log(`[predict.vlr debug] จำนวนแมตช์ที่กำลังแข่งสด (live): ${state.live.length}`, state.live);
   } catch (e) {
     // ไม่ล้าง state.live ทิ้งถ้าพลาดรอบนี้ (เช่น timeout ชั่วคราว) ปล่อยให้โชว์ค่าล่าสุดที่เคยได้ต่อไปก่อน
@@ -789,9 +877,24 @@ function removeToast(toast) {
 
 /* ---------------- predicting ---------------- */
 
+// เดิมพันได้ก็ต่อเมื่อยังเหลือเวลาก่อนแข่งเริ่มมากกว่า BET_CUTOFF_MS (1 ชม.)
+// ถ้าไม่รู้เวลาแข่ง (match_time = null เช่นตอนใช้ข้อมูลตัวอย่าง) ปล่อยให้เดิมพันได้ตามปกติ
+function isBettingOpen(match) {
+  if (!match || !match.match_time) return true;
+  return (match.match_time.getTime() - Date.now()) > BET_CUTOFF_MS;
+}
+
 function makePrediction(matchKey, pick, team1, team2, event, rawBet, rawScorePick) {
   if (!state.user) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะทายผลได้'); return; }
   if (state.data.predictions[matchKey]) return; // already predicted
+
+  // เช็คซ้ำฝั่งนี้กันกรณี UI ยังไม่ re-render ทันตอนใกล้ปิดรับเดิมพันพอดี (การ์ดจะ re-render เองทุก 30 วิ อยู่แล้ว)
+  const match = state.upcoming.find(m => (m.match_page || `${m.team1}-${m.team2}`) === matchKey);
+  if (match && !isBettingOpen(match)) {
+    alert(`ปิดรับเดิมพันแมตช์นี้แล้ว (เหลือเวลาน้อยกว่า ${Math.round(BET_CUTOFF_MS / 60000)} นาทีก่อนแข่งเริ่ม)`);
+    renderPredictTab();
+    return;
+  }
 
   let bet = parseInt(rawBet, 10);
   if (isNaN(bet)) bet = BET_COST;
@@ -1130,6 +1233,7 @@ function matchCardHtml(match, kind) {
   const pickedTeam1 = pred && pred.pick === 'team1';
   const pickedTeam2 = pred && pred.pick === 'team2';
   const locked = !!pred;
+  const bettingOpen = isBettingOpen(match); // false ถ้าเหลือน้อยกว่า BET_CUTOFF_MS (1 ชม.) ก่อนแข่งเริ่ม
   const points = state.data ? state.data.points : 0;
   const canAfford = state.data ? points >= MIN_BET : true;
   const betInputId = safeDomId(key);
@@ -1160,12 +1264,14 @@ function matchCardHtml(match, kind) {
   } else if (pred) {
     const scoreNote = pred.predictedScore ? ` · ทายสกอร์ ${pred.predictedScore}` : '';
     statusBadge = `<span class="badge badge-pending">เดิมพัน ${pred.bet} PT${scoreNote} · รอผล</span>`;
+  } else if (!bettingOpen) {
+    statusBadge = `<span class="badge badge-expired">⏱️ ปิดรับเดิมพันแล้ว (เหลือ &lt;${Math.round(BET_CUTOFF_MS / 60000)} นาทีก่อนแข่ง)</span>`;
   }
 
   const logo1 = match.team1_logo || PLACEHOLDER_LOGO;
   const logo2 = match.team2_logo || PLACEHOLDER_LOGO;
 
-  const betPicker = (!locked && canAfford) ? `
+  const betPicker = (!locked && canAfford && bettingOpen) ? `
     <div class="bet-picker">
       <label for="${betInputId}">เดิมพัน:</label>
       <input type="number" id="${betInputId}" class="bet-input"
@@ -1185,6 +1291,7 @@ function matchCardHtml(match, kind) {
 
   const getBetJs = `document.getElementById('${betInputId}').value`;
   const getScoreJs = `document.getElementById('${scoreSelectId}').value`;
+  const pickDisabled = locked || !canAfford || !bettingOpen;
 
   return `
   <div class="match-card">
@@ -1194,7 +1301,7 @@ function matchCardHtml(match, kind) {
     </div>
     <div class="match-teams">
       <div class="team-slot">
-        <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
+        <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${pickDisabled ? 'disabled' : ''}
           onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
           <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
           <span class="team-name">${match.team1}</span>
@@ -1204,7 +1311,7 @@ function matchCardHtml(match, kind) {
       </div>
       <span class="vs">VS</span>
       <div class="team-slot">
-        <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
+        <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${pickDisabled ? 'disabled' : ''}
           onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
           <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
           <span class="team-name">${match.team2}</span>
@@ -1222,7 +1329,7 @@ function matchCardHtml(match, kind) {
 }
 
 // ---- การ์ดแมตช์สด: โชว์สกอร์เรียลไทม์ ไม่มีปุ่มทายผล (เดิมพันได้เฉพาะแมตช์ที่ยังไม่เริ่มเท่านั้น) ----
-function liveMatchCardHtml(match) {
+function liveMatchCardHtml(match, isFinished = false) {
   const logo1 = match.team1_logo || PLACEHOLDER_LOGO;
   const logo2 = match.team2_logo || PLACEHOLDER_LOGO;
   const mapInfo = [match.current_map, match.map_number ? `แมพที่ ${match.map_number}` : '']
@@ -1231,12 +1338,18 @@ function liveMatchCardHtml(match) {
   const roundLine = hasRounds
     ? `CT ${match.team1_round_ct || 0} / T ${match.team1_round_t || 0}  —  CT ${match.team2_round_ct || 0} / T ${match.team2_round_t || 0}`
     : '';
+  const badge = isFinished
+    ? `<span class="live-badge live-badge-ended">จบแล้ว${mapInfo ? ' · ' + mapInfo : ''}</span>`
+    : `<span class="live-badge"><span class="live-dot"></span>LIVE${mapInfo ? ' · ' + mapInfo : ''}</span>`;
+  const footerRight = isFinished
+    ? `<span class="bet-hint">ผลจบแล้ว</span>`
+    : `<span class="bet-hint">อัปเดตทุก ${LIVE_POLL_MS / 1000} วิ</span>`;
 
   return `
-  <div class="match-card live-card">
+  <div class="match-card live-card${isFinished ? ' live-card-ended' : ''}">
     <div class="match-meta">
       <span>${match.match_event || ''}</span>
-      <span class="live-badge"><span class="live-dot"></span>LIVE${mapInfo ? ' · ' + mapInfo : ''}</span>
+      ${badge}
     </div>
     <div class="match-teams live-teams">
       <div class="team-slot">
@@ -1251,7 +1364,7 @@ function liveMatchCardHtml(match) {
     </div>
     <div class="match-footer">
       <span class="match-time">${roundLine}</span>
-      <span class="bet-hint">อัปเดตทุก ${LIVE_POLL_MS / 1000} วิ</span>
+      ${footerRight}
     </div>
   </div>`;
 }
@@ -1294,10 +1407,22 @@ function getFilteredUpcoming() {
 function renderPredictTab() {
   const liveSection = document.getElementById('live-section');
   const liveList = document.getElementById('live-list');
+  const liveSectionTitle = document.getElementById('live-section-title');
   if (liveSection && liveList) {
-    if (state.live && state.live.length) {
+    // แมตช์ที่เพิ่งจบ (ยังไม่ครบ 24 ชม.) เรียงตามเวลาจบล่าสุดก่อน ต่อท้ายรายการที่ไลฟ์อยู่จริง
+    const finishedEntries = Object.values(state.finishedLive || {})
+      .sort((a, b) => b.finishedAt - a.finishedAt);
+    const hasLive = !!(state.live && state.live.length);
+    const hasAny = hasLive || finishedEntries.length;
+
+    if (hasAny) {
       liveSection.style.display = '';
-      liveList.innerHTML = state.live.map(m => liveMatchCardHtml(m)).join('');
+      liveList.innerHTML =
+        (state.live || []).map(m => liveMatchCardHtml(m, false)).join('') +
+        finishedEntries.map(f => liveMatchCardHtml(f.match, true)).join('');
+      if (liveSectionTitle) {
+        liveSectionTitle.textContent = hasLive ? '🔴 กำลังแข่งสด (Live)' : '🕓 ผลที่เพิ่งจบ';
+      }
     } else {
       liveSection.style.display = 'none';
       liveList.innerHTML = '';
