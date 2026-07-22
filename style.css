@@ -199,6 +199,7 @@ body::before {
 .badge-correct { background: rgba(77,232,150,0.15); color: #4DE896; }
 .badge-wrong { background: rgba(255,59,78,0.15); color: var(--accent); }
 .badge-pending { background: rgba(77,232,255,0.12); color: var(--accent-2); }
+.badge-expired { background: rgba(138,148,163,0.15); color: var(--text-dim); }
 
 .history-list { display: flex; flex-direction: column; gap: 6px; }
 .history-row {
@@ -430,6 +431,7 @@ body::before {
 .match-toast.toast-win   { border-left-color: #4DE896; }
 .match-toast.toast-lose  { border-left-color: var(--accent); }
 .match-toast.toast-mirror{ border-left-color: var(--accent-2); }
+.match-toast.toast-expired{ border-left-color: var(--text-dim); }
 
 .match-toast-close {
   position: absolute; top: 8px; right: 8px; background: transparent; border: none;
@@ -441,6 +443,7 @@ body::before {
 .match-toast.toast-win .match-toast-status { color: #4DE896; }
 .match-toast.toast-lose .match-toast-status { color: var(--accent); }
 .match-toast.toast-mirror .match-toast-status { color: var(--accent-2); }
+.match-toast.toast-expired .match-toast-status { color: var(--text-dim); }
 .match-toast-match { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
 .match-toast-detail { font-size: 12px; color: var(--text-dim); margin: 0 0 6px; }
 .match-toast-reward { font-size: 14px; font-weight: 700; font-family: 'Share Tech Mono', monospace; margin: 0; color: var(--text); }
