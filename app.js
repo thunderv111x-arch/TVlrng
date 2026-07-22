@@ -379,6 +379,7 @@ function bo3ScoreFromPickPerspective(s1, s2, pick) {
 function resolvePendingPredictions() {
   if (!state.data) return;
   let changed = false;
+  const newlyResolved = []; // เก็บผลที่เพิ่งตัดสินได้ในรอบนี้ ไว้เด้งแจ้งเตือนหลังลูป
   for (const key of Object.keys(state.data.predictions)) {
     const pred = state.data.predictions[key];
     if (pred.resolved) continue;
@@ -428,11 +429,63 @@ function resolvePendingPredictions() {
       state.data.points += pred.reward;
     }
     changed = true;
+    newlyResolved.push({ key, pred, outcome });
   }
   if (changed) {
     persist();
     renderTopbar();
+    newlyResolved.forEach(({ pred, outcome }) => showMatchResultToast(pred, outcome));
   }
+}
+
+/* ---------------- match-result toast notifications ---------------- */
+// เด้งแจ้งเตือนมุมจอเมื่อแมตช์ที่ทายไว้ตัดสินผลได้แล้ว (ไม่ใช้ alert() เพราะถ้าจบพร้อมกันหลายแมตช์
+// จะบล็อกหน้าจอทีละอัน) กล่องนี้จะหายไปเองหลังไม่กี่วินาที หรือกดปิดเองได้
+function getOrCreateToastContainer() {
+  let el = document.getElementById('toast-container');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast-container';
+    el.className = 'toast-container';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function showMatchResultToast(pred, outcome) {
+  const container = getOrCreateToastContainer();
+  const pickedTeam = pred.pick === 'team1' ? pred.team1 : pred.team2;
+  const isWin = outcome === 'score_exact' || (outcome === 'normal' && pred.correct);
+  const isMirror = outcome === 'score_mirror';
+
+  let statusClass, statusLabel;
+  if (outcome === 'score_exact') { statusClass = 'toast-win'; statusLabel = '🎯 ทายสกอร์ถูกเป๊ะ!'; }
+  else if (isMirror) { statusClass = 'toast-mirror'; statusLabel = '🔁 สกอร์ตรงแต่ทายทีมพลาด'; }
+  else if (isWin) { statusClass = 'toast-win'; statusLabel = '✅ ทายถูก!'; }
+  else { statusClass = 'toast-lose'; statusLabel = '❌ ทายผิด'; }
+
+  const toast = document.createElement('div');
+  toast.className = `match-toast ${statusClass}`;
+  toast.innerHTML = `
+    <button class="match-toast-close" aria-label="ปิด">✕</button>
+    <p class="match-toast-status">${statusLabel}</p>
+    <p class="match-toast-match">${pred.team1} vs ${pred.team2}</p>
+    <p class="match-toast-detail">คุณทาย: ${pickedTeam}${pred.predictedScore ? ` (${pred.predictedScore})` : ''}</p>
+    <p class="match-toast-reward">${pred.reward >= 0 ? '+' : ''}${pred.reward} PT</p>
+  `;
+  toast.querySelector('.match-toast-close').addEventListener('click', () => removeToast(toast));
+  container.appendChild(toast);
+
+  // auto-dismiss หลัง 8 วินาที
+  const timer = setTimeout(() => removeToast(toast), 8000);
+  toast.dataset.timerId = timer;
+}
+
+function removeToast(toast) {
+  if (!toast || !toast.parentNode) return;
+  clearTimeout(Number(toast.dataset.timerId));
+  toast.classList.add('toast-out');
+  setTimeout(() => toast.remove(), 200);
 }
 
 /* ---------------- predicting ---------------- */
