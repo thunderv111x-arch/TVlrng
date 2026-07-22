@@ -145,6 +145,14 @@
       </div>
     </section>
 
+    <!-- ---- PAGE: Team info (roster / rating / players) ---- -->
+    <section id="tab-teaminfo" class="tab-panel team-info-page">
+      <button type="button" class="team-info-back-btn" onclick="closeTeamInfo()">← กลับ</button>
+      <div id="team-info-body" class="team-info-body">
+        <p class="team-info-loading">กำลังโหลดข้อมูลทีม...</p>
+      </div>
+    </section>
+
   </main>
 </div>
 
@@ -157,16 +165,6 @@
       <p id="case-result-rarity" class="case-result-rarity"></p>
       <h3 id="case-result-name" class="case-result-name"></h3>
       <button class="case-close-btn" onclick="closeCaseOverlay()">ปิด</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== Team info overlay (roster / rating / players) ===== -->
-<div id="team-info-overlay" class="team-info-overlay">
-  <div class="team-info-modal">
-    <button class="team-info-close" onclick="closeTeamInfo()" aria-label="ปิด">✕</button>
-    <div id="team-info-body" class="team-info-body">
-      <p class="team-info-loading">กำลังโหลดข้อมูลทีม...</p>
     </div>
   </div>
 </div>
