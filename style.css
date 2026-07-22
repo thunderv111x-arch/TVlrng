@@ -410,6 +410,45 @@ body::before {
 .tag-fullsense .profile-tag-name,
 .tag-fullsense .tag-preview-name { color: var(--accent-2); }
 
+/* ---------------- Match-result toast notifications ---------------- */
+
+.toast-container {
+  position: fixed; top: 76px; right: 16px; z-index: 1200;
+  display: flex; flex-direction: column; gap: 10px; width: min(320px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.match-toast {
+  pointer-events: auto; position: relative;
+  background: var(--bg-panel); border: 1px solid var(--border); border-left: 4px solid var(--text-dim);
+  border-radius: 4px; padding: 14px 34px 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  animation: toast-in .25s ease-out;
+}
+.match-toast.toast-out { animation: toast-out .2s ease-in forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(24px); } }
+
+.match-toast.toast-win   { border-left-color: #4DE896; }
+.match-toast.toast-lose  { border-left-color: var(--accent); }
+.match-toast.toast-mirror{ border-left-color: var(--accent-2); }
+
+.match-toast-close {
+  position: absolute; top: 8px; right: 8px; background: transparent; border: none;
+  color: var(--text-dim); font-size: 12px; cursor: pointer; padding: 4px; line-height: 1;
+}
+.match-toast-close:hover { color: var(--text); }
+
+.match-toast-status { font-size: 13px; font-weight: 700; margin: 0 0 4px; }
+.match-toast.toast-win .match-toast-status { color: #4DE896; }
+.match-toast.toast-lose .match-toast-status { color: var(--accent); }
+.match-toast.toast-mirror .match-toast-status { color: var(--accent-2); }
+.match-toast-match { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+.match-toast-detail { font-size: 12px; color: var(--text-dim); margin: 0 0 6px; }
+.match-toast-reward { font-size: 14px; font-weight: 700; font-family: 'Share Tech Mono', monospace; margin: 0; color: var(--text); }
+
+@media (max-width: 640px) {
+  .toast-container { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; }
+}
+
 /* ---------------- Responsive ---------------- */
 
 @media (max-width: 640px) {
