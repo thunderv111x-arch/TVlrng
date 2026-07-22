@@ -1412,6 +1412,33 @@ function getFilteredUpcoming() {
   return base.filter(m => m.category === state.leagueFilter);
 }
 
+// จำนวนผลแมตช์ล่าสุดสูงสุดที่จะดึงมาเสริม (เผื่อ state.results ยาวมาก ไม่อยากให้การ์ดล้นเกินไป)
+const MAX_RECENT_RESULT_CARDS = 8;
+
+// finishedLive (จาก live_score) จับได้แค่แมตช์ที่ "เพิ่งจบระหว่างที่เปิดเว็บอยู่" เท่านั้น เพราะมันเทียบ
+// สแนปช็อตไลฟ์รอบก่อนกับรอบปัจจุบัน ถ้าแมตช์จบไปตั้งแต่ก่อนเปิดเว็บ/ก่อน refresh (ไม่เคยเห็นตอนไลฟ์เลย)
+// จะไม่มีทางถูกจับได้ด้วยกลไกนั้น เลยต้องดึงเสริมจาก state.results (endpoint q=results ที่มีผลแมตช์
+// ที่จบไปแล้วทั้งหมดอยู่แล้ว ไม่ต้องพึ่งการ track ตอนไลฟ์) มาแสดงเพิ่ม กันพลาดแมตช์ที่จบไปก่อนหน้านั้น
+function getRecentResultCards(finishedEntries) {
+  const norm = s => (s || '').trim().toLowerCase();
+  const alreadyShown = new Set();
+  finishedEntries.forEach(f => {
+    alreadyShown.add(`${norm(f.match.team1)}|${norm(f.match.team2)}`);
+    alreadyShown.add(`${norm(f.match.team2)}|${norm(f.match.team1)}`); // กันสลับข้าง
+  });
+
+  const extras = [];
+  for (const r of (state.results || [])) {
+    const pairKey = `${norm(r.team1)}|${norm(r.team2)}`;
+    if (alreadyShown.has(pairKey)) continue; // แมตช์นี้มีการ์ดจาก finishedLive อยู่แล้ว ไม่ต้องซ้ำ
+    if (r.score1 === undefined || r.score1 === null || r.score1 === '') continue; // ยังไม่มีสกอร์ ข้าม
+    alreadyShown.add(pairKey);
+    extras.push(r);
+    if (extras.length >= MAX_RECENT_RESULT_CARDS) break; // สมมติว่า API เรียงใหม่สุดมาก่อนอยู่แล้ว
+  }
+  return extras;
+}
+
 function renderPredictTab() {
   const liveSection = document.getElementById('live-section');
   const liveList = document.getElementById('live-list');
@@ -1420,14 +1447,17 @@ function renderPredictTab() {
     // แมตช์ที่เพิ่งจบ (ยังไม่ครบ 24 ชม.) เรียงตามเวลาจบล่าสุดก่อน ต่อท้ายรายการที่ไลฟ์อยู่จริง
     const finishedEntries = Object.values(state.finishedLive || {})
       .sort((a, b) => b.finishedAt - a.finishedAt);
+    // เสริมด้วยผลแมตช์ที่จบไปแล้วก่อนเปิดเว็บ/ก่อน refresh ซึ่ง finishedLive เพียงอย่างเดียวจับไม่ได้
+    const recentResultCards = getRecentResultCards(finishedEntries);
     const hasLive = !!(state.live && state.live.length);
-    const hasAny = hasLive || finishedEntries.length;
+    const hasAny = hasLive || finishedEntries.length || recentResultCards.length;
 
     if (hasAny) {
       liveSection.style.display = '';
       liveList.innerHTML =
         (state.live || []).map(m => liveMatchCardHtml(m, false)).join('') +
-        finishedEntries.map(f => liveMatchCardHtml(f.match, true)).join('');
+        finishedEntries.map(f => liveMatchCardHtml(f.match, true)).join('') +
+        recentResultCards.map(r => liveMatchCardHtml(r, true)).join('');
       if (liveSectionTitle) {
         liveSectionTitle.textContent = hasLive ? '🔴 กำลังแข่งสด (Live)' : '🕓 ผลที่เพิ่งจบ';
       }
