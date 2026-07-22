@@ -634,7 +634,7 @@ function normalizeLiveMatch(m, logoMap) {
     current_map: cleanLiveField(m.current_map),
     match_event: tournamentName,
     match_series: m.match_series || '',
-    match_page: m.match_page || `${m.team1}-${m.team2}-live`,
+    match_page: m.match_page || `${m.team1}-${m.team2}-${tournamentName}-live`,
     category: classifyTournament(tournamentName),
   };
 }
@@ -878,9 +878,13 @@ function removeToast(toast) {
 /* ---------------- predicting ---------------- */
 
 // เดิมพันได้ก็ต่อเมื่อยังเหลือเวลาก่อนแข่งเริ่มมากกว่า BET_CUTOFF_MS (1 ชม.)
-// ถ้าไม่รู้เวลาแข่ง (match_time = null เช่นตอนใช้ข้อมูลตัวอย่าง) ปล่อยให้เดิมพันได้ตามปกติ
+// เดิม code ถ้าไม่รู้เวลาแข่ง (match_time = null) จะปล่อยให้เดิมพันได้ตลอด (bug: แมตช์ที่ API
+// ส่ง unix_timestamp มาไม่ได้/parse ไม่ออก จะเดิมพันได้ไปเรื่อยๆ แม้แข่งเริ่มไปแล้วก็ตาม)
+// แก้ให้ปล่อยผ่าน (true) เฉพาะตอนใช้ "ข้อมูลตัวอย่าง" (state.usingFallback) เท่านั้น
+// ส่วนข้อมูลจริงจาก API ถ้าไม่รู้เวลาแข่ง ให้ถือว่าปิดรับเดิมพันไว้ก่อนเพื่อความปลอดภัย
 function isBettingOpen(match) {
-  if (!match || !match.match_time) return true;
+  if (!match) return true;
+  if (!match.match_time) return !!state.usingFallback;
   return (match.match_time.getTime() - Date.now()) > BET_CUTOFF_MS;
 }
 
@@ -1400,8 +1404,12 @@ function renderLeagueFilterBar() {
 }
 
 function getFilteredUpcoming() {
-  if (state.leagueFilter === 'all') return state.upcoming;
-  return state.upcoming.filter(m => m.category === state.leagueFilter);
+  // กันแมตช์ที่เริ่มไลฟ์ไปแล้วแต่ endpoint upcoming_extended cache ยังไม่ทันอัปเดต (cache 5 นาที)
+  // ไม่ให้โผล่ซ้ำเป็นการ์ด "กำลังจะแข่ง" ที่ยังกดเดิมพันได้อยู่
+  const liveKeys = new Set((state.live || []).map(m => m.match_page));
+  const base = state.upcoming.filter(m => !liveKeys.has(m.match_page));
+  if (state.leagueFilter === 'all') return base;
+  return base.filter(m => m.category === state.leagueFilter);
 }
 
 function renderPredictTab() {
