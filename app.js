@@ -356,22 +356,43 @@ function unwrapPayload(res) {
   return res;
 }
 
+// ลองยิงหลาย path เรียงลำดับ ใช้ผลแรกที่สำเร็จ (กันเคส self-host คนละ commit กัน บาง instance มีแค่ endpoint
+// เดิม บาง instance ต้องใช้ /v2 เท่านั้น) ถ้าพังหมดทุก path จะ throw error ของ path สุดท้ายออกไป พร้อม log ราย path
+async function apiGetFirstOk(paths, debugLabel) {
+  let lastErr;
+  for (const path of paths) {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}${path}`, FETCH_TIMEOUT_MS);
+      console.log(`[predict.vlr debug] ${debugLabel}: ${path} สำเร็จ`, res);
+      return res;
+    } catch (e) {
+      console.warn(`[predict.vlr debug] ${debugLabel}: ${path} พลาด —`, e.message || e);
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 async function findTeamId(teamName) {
   const key = (teamName || '').trim().toLowerCase();
   if (!key) return null;
   if (teamIdCache.has(key)) return teamIdCache.get(key);
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/search?q=${encodeURIComponent(teamName)}`, FETCH_TIMEOUT_MS);
+    const res = await apiGetFirstOk([
+      `/search?q=${encodeURIComponent(teamName)}`,
+      `/v2/search?q=${encodeURIComponent(teamName)}`,
+    ], `findTeamId("${teamName}")`);
     const payload = unwrapPayload(res);
     const teams = payload?.segments?.results?.teams || payload?.results?.teams || payload?.teams || [];
     // เลือกทีมที่ชื่อตรงเป๊ะก่อน (case-insensitive) ถ้าไม่มีค่อย fallback ไปผลลัพธ์แรกที่ API คืนมา
     const exact = teams.find(t => (t.name || '').trim().toLowerCase() === key);
     const picked = exact || teams[0] || null;
     const id = picked ? picked.id : null;
+    if (!id) console.warn(`[predict.vlr debug] findTeamId("${teamName}") ไม่พบทีมใน response`, payload);
     teamIdCache.set(key, id);
     return id;
   } catch (e) {
-    console.warn('[predict.vlr debug] ค้นหา team id ไม่สำเร็จ:', teamName, e);
+    console.warn('[predict.vlr debug] ค้นหา team id ไม่สำเร็จ (ทุก path พังหมด):', teamName, e);
     return null;
   }
 }
@@ -379,8 +400,12 @@ async function findTeamId(teamName) {
 async function fetchTeamProfile(teamId) {
   const cached = teamProfileCache.get(teamId);
   if (cached && (Date.now() - cached.fetchedAt) < TEAM_PROFILE_TTL_MS) return cached.data;
-  const res = await fetchWithTimeout(`${API_BASE}/team?id=${encodeURIComponent(teamId)}&q=profile`, FETCH_TIMEOUT_MS);
+  const res = await apiGetFirstOk([
+    `/team?id=${encodeURIComponent(teamId)}&q=profile`,
+    `/v2/team?id=${encodeURIComponent(teamId)}&q=profile`,
+  ], `fetchTeamProfile(${teamId})`);
   const data = unwrapPayload(res);
+  if (!data?.info) console.warn(`[predict.vlr debug] fetchTeamProfile(${teamId}) response ไม่มี info`, data);
   if (data) teamProfileCache.set(teamId, { data, fetchedAt: Date.now() });
   return data;
 }
@@ -392,7 +417,8 @@ function escapeHtml(s) {
 function teamInfoErrorHtml(teamName) {
   return `
     <div class="team-info-header"><h3 class="team-info-name">${escapeHtml(teamName)}</h3></div>
-    <p class="team-info-error">⚠️ ดึงข้อมูลทีมนี้ไม่ได้ตอนนี้ — อาจหาทีมนี้ไม่เจอบน vlr.gg (เช่น ชื่อทีมสะกดคนละแบบ) หรือ API ล่มชั่วคราว</p>`;
+    <p class="team-info-error">⚠️ ดึงข้อมูลทีมนี้ไม่ได้ตอนนี้ — อาจหาทีมนี้ไม่เจอบน vlr.gg (เช่น ชื่อทีมสะกดคนละแบบ) หรือ API ล่มชั่วคราว<br>
+    (เปิด F12 → Console เพื่อดู log รายละเอียดว่า endpoint ไหนพัง)</p>`;
 }
 
 function teamInfoHtml(profile, fallbackName) {
@@ -440,12 +466,25 @@ function teamInfoHtml(profile, fallbackName) {
     ${placementsHtml}`;
 }
 
+// จำแท็บที่ผู้ใช้อยู่ก่อนกดปุ่ม ⓘ ไว้ เพื่อให้ปุ่ม "กลับ" พาย้อนกลับไปหน้าเดิมที่ถูกต้อง
+let teamInfoPreviousTab = 'predict';
+
+function goToTeamInfoPage() {
+  const activePanel = document.querySelector('.tab-panel.active');
+  // ถ้าแท็บที่ active อยู่ตอนนี้ไม่ใช่หน้า teaminfo เอง ให้จำไว้เป็นแท็บที่จะย้อนกลับไป
+  if (activePanel && activePanel.id !== 'tab-teaminfo') {
+    teamInfoPreviousTab = activePanel.id.replace('tab-', '');
+  }
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-teaminfo').classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
 async function openTeamInfo(teamName) {
-  const overlay = document.getElementById('team-info-overlay');
+  goToTeamInfoPage();
   const body = document.getElementById('team-info-body');
   const mySeq = ++teamInfoRequestSeq;
   body.innerHTML = `<p class="team-info-loading">กำลังโหลดข้อมูล ${escapeHtml(teamName)} ...</p>`;
-  overlay.classList.add('open');
 
   try {
     const teamId = await findTeamId(teamName);
@@ -462,7 +501,7 @@ async function openTeamInfo(teamName) {
 }
 
 function closeTeamInfo() {
-  document.getElementById('team-info-overlay').classList.remove('open');
+  switchTab(teamInfoPreviousTab);
 }
 
 function normalizeMatch(m, logoMap) {
@@ -1292,8 +1331,5 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('case-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'case-overlay') closeCaseOverlay();
-  });
-  document.getElementById('team-info-overlay').addEventListener('click', (e) => {
-    if (e.target.id === 'team-info-overlay') closeTeamInfo();
   });
 });
