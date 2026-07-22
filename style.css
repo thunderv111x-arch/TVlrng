@@ -227,6 +227,10 @@ body::before {
 }
 .live-score-sep { color: var(--text-dim); margin: 0 6px; }
 
+/* การ์ดแมตช์ที่เพิ่งจบ (ยังไม่ครบ 24 ชม.) — โทนสีนิ่งลง ไม่มีจุดกะพริบเหมือน LIVE จริง */
+.live-card-ended { border-color: var(--border, rgba(255,255,255,.12)); opacity: .85; }
+.live-badge-ended { color: var(--text-dim); font-weight: 700; letter-spacing: .05em; }
+
 .badge { padding: 3px 8px; border-radius: 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .badge-correct { background: rgba(77,232,150,0.15); color: #4DE896; }
 .badge-wrong { background: rgba(255,59,78,0.15); color: var(--accent); }
