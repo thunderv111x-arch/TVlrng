@@ -17,6 +17,11 @@ const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.goo
 const API_BASE = 'https://vlrggapi-psi.vercel.app';
 const FETCH_TIMEOUT_MS = 6000;
 
+// API ตัวนี้ (vlrggapi ที่เรา self-host) ไม่ส่งโลโก้ทีมมาให้เลย ทั้งฝั่ง upcoming และ results
+// แต่ API เก่าที่เคยใช้ (vlr.orlandomm.net) มีโลโก้ให้ — เลยดึงมาแค่ "เสริม" เรื่องรูปเท่านั้น
+// (ไม่ใช้เรื่องสกอร์/ผลแมตช์จากตัวนี้อีกแล้ว เพราะพบว่าสกอร์เป็นค่าว่างเปล่า ไม่แม่นยำ)
+const LOGO_API_BASE = 'https://vlr.orlandomm.net/api/v1';
+
 // เดิมเว็บนี้ล็อกไว้แค่ VCT Pacific เท่านั้น ตอนนี้เปลี่ยนเป็นดึงมาทุกลีก
 // แล้วให้ผู้ใช้เลือกดูเองผ่านตัวกรองลีกในหน้า "ทายผล" แทน
 // (การจัดหมวดหมู่ทำที่ data.js ผ่าน LEAGUE_CATEGORIES / classifyTournament)
@@ -280,13 +285,41 @@ function extractVlrMatchId(value) {
   return /^\d+$/.test(s) ? s : null;
 }
 
-function normalizeMatch(m) {
+// ---- ดึงโลโก้ทีมมาเสริมจาก API เก่า (มีแต่ vlr.orlandomm.net เท่านั้นที่ให้โลโก้มาด้วย) ----
+// คืนค่าเป็น Map: ชื่อทีม (ตัวพิมพ์เล็ก, ตัดช่องว่างหัวท้าย) -> URL โลโก้
+// ถ้าดึงไม่สำเร็จ (API ล่ม/timeout) จะคืน Map ว่างเปล่า ไม่ทำให้หน้าเว็บพัง แค่ไม่มีโลโก้เสริม
+async function buildLogoMap() {
+  const map = new Map();
+  try {
+    const [matchesRes, resultsRes] = await Promise.all([
+      fetchWithTimeout(`${LOGO_API_BASE}/matches`, FETCH_TIMEOUT_MS),
+      fetchWithTimeout(`${LOGO_API_BASE}/results`, FETCH_TIMEOUT_MS),
+    ]);
+    const addTeams = (list) => {
+      (list || []).forEach(entry => {
+        (entry.teams || []).forEach(t => {
+          if (t.name && t.logo && !map.has(t.name.trim().toLowerCase())) {
+            map.set(t.name.trim().toLowerCase(), t.logo);
+          }
+        });
+      });
+    };
+    addTeams(matchesRes?.data);
+    addTeams(resultsRes?.data);
+  } catch (e) {
+    console.warn('[predict.vlr debug] ดึงโลโก้ทีมเสริมจาก API เก่าไม่สำเร็จ (จะแสดงโลโก้ default แทน)', e);
+  }
+  return map;
+}
+
+function normalizeMatch(m, logoMap) {
   const tournamentName = m.match_event || '';
+  const lookupLogo = name => (logoMap && logoMap.get((name || '').trim().toLowerCase())) || PLACEHOLDER_LOGO;
   return {
     team1: m.team1 || 'TBD',
     team2: m.team2 || 'TBD',
-    team1_logo: PLACEHOLDER_LOGO, // API นี้ไม่ได้ส่งโลโก้ทีมมาให้สำหรับแมตช์ที่ยังไม่แข่ง
-    team2_logo: PLACEHOLDER_LOGO,
+    team1_logo: lookupLogo(m.team1),
+    team2_logo: lookupLogo(m.team2),
     match_event: tournamentName,
     match_series: m.match_series || '',
     time_until_match: m.time_until_match || '',
@@ -295,13 +328,14 @@ function normalizeMatch(m) {
   };
 }
 
-function normalizeResult(r) {
+function normalizeResult(r, logoMap) {
   const tournamentName = r.tournament_name || '';
+  const lookupLogo = name => (logoMap && logoMap.get((name || '').trim().toLowerCase())) || PLACEHOLDER_LOGO;
   return {
     team1: r.team1 || 'TBD',
     team2: r.team2 || 'TBD',
-    team1_logo: PLACEHOLDER_LOGO,
-    team2_logo: PLACEHOLDER_LOGO,
+    team1_logo: lookupLogo(r.team1),
+    team2_logo: lookupLogo(r.team2),
     score1: r.score1,
     score2: r.score2,
     match_event: tournamentName,
@@ -320,15 +354,16 @@ async function loadMatches() {
   const statusEl = document.getElementById('data-status');
   statusEl.textContent = 'กำลังดึงข้อมูลแมตช์จาก vlr.gg ...';
   try {
-    const [matchesRes, resultsRes] = await Promise.all([
+    const [matchesRes, resultsRes, logoMap] = await Promise.all([
       fetchWithTimeout(`${API_BASE}/match?q=upcoming`, FETCH_TIMEOUT_MS),
       fetchWithTimeout(`${API_BASE}/match?q=results`, FETCH_TIMEOUT_MS),
+      buildLogoMap(),
     ]);
     const rawUpcoming = matchesRes?.data?.segments || [];
     const rawResults = resultsRes?.data?.segments || [];
 
-    state.upcoming = rawUpcoming.map(normalizeMatch);
-    state.results = rawResults.map(normalizeResult);
+    state.upcoming = rawUpcoming.map(m => normalizeMatch(m, logoMap));
+    state.results = rawResults.map(r => normalizeResult(r, logoMap));
     state.usingFallback = false;
     statusEl.textContent = `เชื่อมต่อ vlr.gg สำเร็จ • ทุกลีก • ${state.upcoming.length} แมตช์ที่กำลังจะแข่ง`;
 
