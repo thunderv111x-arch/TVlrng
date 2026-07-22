@@ -17,10 +17,16 @@ const GOOGLE_CLIENT_ID = '382344978450-e86echom7fqs2jrpckg3qafobf4tdrgr.apps.goo
 const API_BASE = 'https://vlrggapi-psi.vercel.app';
 const FETCH_TIMEOUT_MS = 6000;
 
-// API ตัวนี้ (vlrggapi ที่เรา self-host) ไม่ส่งโลโก้ทีมมาให้เลย ทั้งฝั่ง upcoming และ results
-// แต่ API เก่าที่เคยใช้ (vlr.orlandomm.net) มีโลโก้ให้ — เลยดึงมาแค่ "เสริม" เรื่องรูปเท่านั้น
-// (ไม่ใช้เรื่องสกอร์/ผลแมตช์จากตัวนี้อีกแล้ว เพราะพบว่าสกอร์เป็นค่าว่างเปล่า ไม่แม่นยำ)
-const LOGO_API_BASE = 'https://vlr.orlandomm.net/api/v1';
+// API ตัวนี้ (vlrggapi ที่เรา self-host) ฝั่ง /match (upcoming/results) ไม่ได้ส่ง "โลโก้ทีม" มาให้
+// ส่งมาแค่ flag1/flag2 (ธงชาติ เช่น "flag_us") เท่านั้น ซึ่งไม่ใช่โลโก้ทีม เอามาแสดงเป็นโลโก้ไม่ได้
+// เดิมเว็บนี้เคยไปดึงโลโก้เสริมจาก API อื่น (vlr.orlandomm.net) แต่ตอนนี้เลิกใช้แล้ว
+// (ให้ vlrggapi ตัวที่ self-host ไว้เป็น "หลัก" แหล่งเดียวตามที่ต้องการ)
+// แก้โดยดึงโลโก้จาก endpoint /rankings ของ vlrggapi ตัวเดียวกันแทน (มีฟิลด์ "logo" ของทีมที่ติดอันดับ
+// และ "last_played_team_logo" ของคู่แข่งนัดล่าสุด ซึ่งช่วยครอบคลุมทีมที่ไม่ติดอันดับ top ของภูมิภาคด้วย)
+// ดึงหลายภูมิภาคพร้อมกันให้ครอบคลุมทุกลีกที่เว็บนี้แสดง แล้ว cache ผลไว้ฝั่ง client กันยิงรัว ๆ ทุก 5 นาที
+const RANKING_REGIONS = ['na', 'eu', 'ap', 'la', 'la-s', 'la-n', 'oce', 'kr', 'mn', 'gc', 'br', 'cn', 'jp', 'col'];
+const LOGO_MAP_TTL_MS = 60 * 60 * 1000; // cache แผนที่โลโก้ไว้ 1 ชม. (ฝั่ง API เองก็ cache /rankings ไว้ 1 ชม. อยู่แล้ว)
+let logoMapCache = { map: new Map(), builtAt: 0 };
 
 // เดิมเว็บนี้ล็อกไว้แค่ VCT Pacific เท่านั้น ตอนนี้เปลี่ยนเป็นดึงมาทุกลีก
 // แล้วให้ผู้ใช้เลือกดูเองผ่านตัวกรองลีกในหน้า "ทายผล" แทน
@@ -285,31 +291,47 @@ function extractVlrMatchId(value) {
   return /^\d+$/.test(s) ? s : null;
 }
 
-// ---- ดึงโลโก้ทีมมาเสริมจาก API เก่า (มีแต่ vlr.orlandomm.net เท่านั้นที่ให้โลโก้มาด้วย) ----
-// คืนค่าเป็น Map: ชื่อทีม (ตัวพิมพ์เล็ก, ตัดช่องว่างหัวท้าย) -> URL โลโก้
-// ถ้าดึงไม่สำเร็จ (API ล่ม/timeout) จะคืน Map ว่างเปล่า ไม่ทำให้หน้าเว็บพัง แค่ไม่มีโลโก้เสริม
+// ---- ดึงโลโก้ทีมจาก /rankings ของ vlrggapi (ตัวเดียวกับ API หลัก ไม่พึ่ง API อื่นแล้ว) ----
+// ยิงแยกทีละภูมิภาค แล้วรวมเป็น Map เดียว: ชื่อทีม (ตัวพิมพ์เล็ก, ตัดช่องว่างหัวท้าย) -> URL โลโก้
+// ใช้ Promise.allSettled เพราะบางภูมิภาคอาจดึงไม่สำเร็จ/timeout แต่ไม่อยากให้ภูมิภาคอื่นพังไปด้วย
+// มี cache ฝั่ง client (LOGO_MAP_TTL_MS) กันยิงซ้ำทุกครั้งที่ loadMatches ทำงาน (ทุก 5 นาที)
 async function buildLogoMap() {
-  const map = new Map();
-  try {
-    const [matchesRes, resultsRes] = await Promise.all([
-      fetchWithTimeout(`${LOGO_API_BASE}/matches`, FETCH_TIMEOUT_MS),
-      fetchWithTimeout(`${LOGO_API_BASE}/results`, FETCH_TIMEOUT_MS),
-    ]);
-    const addTeams = (list) => {
-      (list || []).forEach(entry => {
-        (entry.teams || []).forEach(t => {
-          if (t.name && t.logo && !map.has(t.name.trim().toLowerCase())) {
-            map.set(t.name.trim().toLowerCase(), t.logo);
-          }
-        });
-      });
-    };
-    addTeams(matchesRes?.data);
-    addTeams(resultsRes?.data);
-  } catch (e) {
-    console.warn('[predict.vlr debug] ดึงโลโก้ทีมเสริมจาก API เก่าไม่สำเร็จ (จะแสดงโลโก้ default แทน)', e);
+  const now = Date.now();
+  if (logoMapCache.map.size && (now - logoMapCache.builtAt) < LOGO_MAP_TTL_MS) {
+    return logoMapCache.map;
   }
-  return map;
+
+  const map = new Map();
+  const addLogo = (name, logo) => {
+    if (!name || !logo) return;
+    const key = name.trim().toLowerCase();
+    if (!key || map.has(key)) return;
+    // บาง URL จาก vlr.gg ขึ้นต้นด้วย "//" (protocol-relative) เติม https: ให้ก่อนใช้เป็น src รูป
+    map.set(key, logo.startsWith('//') ? `https:${logo}` : logo);
+  };
+  // "last_played_team" ในผลลัพธ์ /rankings จะมีคำนำหน้า "vs. " ติดมาด้วย เช่น "vs. Evil Geniuses" ต้องตัดออกก่อน
+  const stripVsPrefix = (name) => (name || '').replace(/^vs\.?\s*/i, '');
+
+  const results = await Promise.allSettled(
+    RANKING_REGIONS.map(region => fetchWithTimeout(`${API_BASE}/rankings?region=${region}`, FETCH_TIMEOUT_MS))
+  );
+  results.forEach(r => {
+    if (r.status !== 'fulfilled') return;
+    const rows = r.value?.data || [];
+    rows.forEach(row => {
+      addLogo(row.team, row.logo);
+      // เผื่อโลโก้ของคู่แข่งนัดล่าสุด ซึ่งอาจเป็นทีมที่ไม่ติดอันดับ top ของภูมิภาคนั้นเอง
+      addLogo(stripVsPrefix(row.last_played_team), row.last_played_team_logo);
+    });
+  });
+
+  if (map.size) {
+    logoMapCache = { map, builtAt: now };
+    return map;
+  }
+  // ถ้ารอบนี้ดึงไม่สำเร็จเลยสักภูมิภาค ใช้แคชเก่า (ถ้ามี) ดีกว่าไม่มีโลโก้เลย
+  console.warn('[predict.vlr debug] ดึงโลโก้ทีมจาก /rankings ไม่สำเร็จรอบนี้ ใช้แคชเดิม (ถ้ามี) แทน');
+  return logoMapCache.map;
 }
 
 function normalizeMatch(m, logoMap) {
