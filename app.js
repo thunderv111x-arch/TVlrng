@@ -46,10 +46,16 @@ const state = {
   user: null,        // { sub, name, picture, email }
   data: null,        // per-user save data (points, inventory, predictions, equipped)
   upcoming: [],
+  live: [],           // แมตช์ที่กำลังแข่งอยู่ตอนนี้ พร้อมสกอร์เรียลไทม์ (จาก q=live_score)
   results: [],
   usingFallback: false,
   leagueFilter: localStorage.getItem(LEAGUE_FILTER_STORAGE_KEY) || 'all', // ตัวกรองลีก (global ไม่ผูกกับ user)
 };
+
+// ---- Live score polling ----
+// vlrggapi เอง cache endpoint q=live_score ไว้แค่ 30 วิ (ดู README) เลย poll ถี่กว่า loadMatches()
+// (ซึ่งดึง upcoming/results หนักกว่าและ cache 5 นาที) แยกกันเพื่อไม่ต้องยิงทุกอย่างซ้ำทุก 30 วิ
+const LIVE_POLL_MS = 30 * 1000;
 
 /* ---------------- storage helpers ---------------- */
 
@@ -541,6 +547,32 @@ function normalizeResult(r, logoMap) {
   };
 }
 
+// ---- แมตช์สด (q=live_score) ----
+// endpoint นี้ต่างจาก upcoming/results ตรงที่ส่ง team1_logo/team2_logo มาให้ตรงๆ อยู่แล้ว
+// (ไม่ต้องพึ่ง logoMap จาก /rankings) แต่ใส่ fallback ไว้เผื่อบางแมตช์ไม่มีโลโก้ติดมา
+function normalizeLiveMatch(m, logoMap) {
+  const tournamentName = m.match_event || '';
+  const lookupLogo = name => (logoMap && logoMap.get((name || '').trim().toLowerCase())) || PLACEHOLDER_LOGO;
+  return {
+    team1: m.team1 || 'TBD',
+    team2: m.team2 || 'TBD',
+    team1_logo: m.team1_logo || lookupLogo(m.team1),
+    team2_logo: m.team2_logo || lookupLogo(m.team2),
+    score1: m.score1 ?? '0',
+    score2: m.score2 ?? '0',
+    team1_round_ct: m.team1_round_ct || '',
+    team1_round_t: m.team1_round_t || '',
+    team2_round_ct: m.team2_round_ct || '',
+    team2_round_t: m.team2_round_t || '',
+    map_number: m.map_number || '',
+    current_map: m.current_map || '',
+    match_event: tournamentName,
+    match_series: m.match_series || '',
+    match_page: m.match_page || `${m.team1}-${m.team2}-live`,
+    category: classifyTournament(tournamentName),
+  };
+}
+
 // ---- หมายเหตุ China ----
 // API ตัวก่อนหน้า (vlr.orlandomm.net) มีปัญหาดึงแมตช์ China มาไม่ครบ เลยต้องมีโค้ด backfill แยกยิง region=ch
 // API ตัวใหม่ (vlrggapi ที่ deploy เอง) สแครปหน้าแมตช์ vlr.gg ตรงๆ แบบเดียวกับที่เว็บ vlr.gg แสดงผลเอง
@@ -550,8 +582,10 @@ async function loadMatches() {
   const statusEl = document.getElementById('data-status');
   statusEl.textContent = 'กำลังดึงข้อมูลแมตช์จาก vlr.gg ...';
   try {
+    // แก้บั๊ก "แมตช์มีน้อย": เดิมยิง q=upcoming ซึ่งคืนมาแค่ชุดสั้นๆ (เหมือนวิดเจ็ตหน้าแรก vlr.gg)
+    // เปลี่ยนเป็น q=upcoming_extended ซึ่ง endpoint เดียวกันของ vlrggapi ให้รายการแมตช์ที่กำลังจะมาถึงยาวกว่ามาก
     const [matchesRes, resultsRes, logoMap] = await Promise.all([
-      fetchWithTimeout(`${API_BASE}/match?q=upcoming`, FETCH_TIMEOUT_MS),
+      fetchWithTimeout(`${API_BASE}/match?q=upcoming_extended`, FETCH_TIMEOUT_MS),
       fetchWithTimeout(`${API_BASE}/match?q=results`, FETCH_TIMEOUT_MS),
       buildLogoMap(),
     ]);
@@ -578,6 +612,23 @@ async function loadMatches() {
     statusEl.textContent = '⚠️ ต่อ API ของ vlr.gg ไม่ได้ตอนนี้ (unofficial API อาจล่มชั่วคราว) กำลังแสดงข้อมูลตัวอย่าง';
   }
   resolvePendingPredictions();
+  renderPredictTab();
+}
+
+// ---- แมตช์สด + สกอร์เรียลไทม์ (ของใหม่) ----
+// vlrggapi มี endpoint q=live_score แยกต่างหาก ให้สกอร์ปัจจุบัน/ราวด์ CT-T/แมพที่กำลังเล่นของแมตช์ที่ไลฟ์อยู่
+// เดิมเว็บนี้ไม่เคยเรียก endpoint นี้เลย เลยไม่มีการแสดงผลสดๆ แก้โดยเพิ่มฟังก์ชันนี้ + poll ทุก 30 วิ (ตาม cache ของ API)
+async function loadLiveScores() {
+  try {
+    const logoMap = await buildLogoMap(); // ใช้แคชเดิมถ้ายังไม่หมดอายุ ไม่ยิงซ้ำ
+    const liveRes = await fetchWithTimeout(`${API_BASE}/match?q=live_score`, FETCH_TIMEOUT_MS);
+    const rawLive = liveRes?.data?.segments || [];
+    state.live = rawLive.map(m => normalizeLiveMatch(m, logoMap));
+    console.log(`[predict.vlr debug] จำนวนแมตช์ที่กำลังแข่งสด (live): ${state.live.length}`, state.live);
+  } catch (e) {
+    // ไม่ล้าง state.live ทิ้งถ้าพลาดรอบนี้ (เช่น timeout ชั่วคราว) ปล่อยให้โชว์ค่าล่าสุดที่เคยได้ต่อไปก่อน
+    console.warn('ดึงสกอร์เรียลไทม์ (live_score) ไม่สำเร็จรอบนี้', e);
+  }
   renderPredictTab();
 }
 
@@ -1170,6 +1221,41 @@ function matchCardHtml(match, kind) {
   </div>`;
 }
 
+// ---- การ์ดแมตช์สด: โชว์สกอร์เรียลไทม์ ไม่มีปุ่มทายผล (เดิมพันได้เฉพาะแมตช์ที่ยังไม่เริ่มเท่านั้น) ----
+function liveMatchCardHtml(match) {
+  const logo1 = match.team1_logo || PLACEHOLDER_LOGO;
+  const logo2 = match.team2_logo || PLACEHOLDER_LOGO;
+  const mapInfo = [match.current_map, match.map_number ? `แมพที่ ${match.map_number}` : '']
+    .filter(Boolean).join(' · ');
+  const hasRounds = match.team1_round_ct || match.team1_round_t || match.team2_round_ct || match.team2_round_t;
+  const roundLine = hasRounds
+    ? `CT ${match.team1_round_ct || 0} / T ${match.team1_round_t || 0}  —  CT ${match.team2_round_ct || 0} / T ${match.team2_round_t || 0}`
+    : '';
+
+  return `
+  <div class="match-card live-card">
+    <div class="match-meta">
+      <span>${match.match_event || ''}</span>
+      <span class="live-badge"><span class="live-dot"></span>LIVE${mapInfo ? ' · ' + mapInfo : ''}</span>
+    </div>
+    <div class="match-teams live-teams">
+      <div class="team-slot">
+        <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="team-name">${match.team1}</span>
+      </div>
+      <span class="live-score">${match.score1}<span class="live-score-sep">–</span>${match.score2}</span>
+      <div class="team-slot">
+        <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="team-name">${match.team2}</span>
+      </div>
+    </div>
+    <div class="match-footer">
+      <span class="match-time">${roundLine}</span>
+      <span class="bet-hint">อัปเดตทุก ${LIVE_POLL_MS / 1000} วิ</span>
+    </div>
+  </div>`;
+}
+
 /* ---------------- league filter ---------------- */
 
 function setLeagueFilter(id) {
@@ -1206,6 +1292,18 @@ function getFilteredUpcoming() {
 }
 
 function renderPredictTab() {
+  const liveSection = document.getElementById('live-section');
+  const liveList = document.getElementById('live-list');
+  if (liveSection && liveList) {
+    if (state.live && state.live.length) {
+      liveSection.style.display = '';
+      liveList.innerHTML = state.live.map(m => liveMatchCardHtml(m)).join('');
+    } else {
+      liveSection.style.display = 'none';
+      liveList.innerHTML = '';
+    }
+  }
+
   renderLeagueFilterBar();
   const list = document.getElementById('upcoming-list');
   const filtered = getFilteredUpcoming();
@@ -1330,7 +1428,9 @@ function onSignedIn() {
 window.addEventListener('DOMContentLoaded', () => {
   initGoogleSignIn();
   loadMatches();
+  loadLiveScores();
   setInterval(loadMatches, 5 * 60 * 1000); // refresh every 5 min
+  setInterval(loadLiveScores, LIVE_POLL_MS); // สกอร์เรียลไทม์: poll ทุก 30 วิ ตาม cache ของ vlrggapi
   setInterval(updateDailyBonusUI, 1000); // นับถอยหลังปุ่มรับโบนัสรายวันแบบเรียลไทม์
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('case-overlay').addEventListener('click', (e) => {
