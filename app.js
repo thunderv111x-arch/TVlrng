@@ -349,6 +349,7 @@ async function loadMatches() {
     const rawStatuses = [...new Set((matchesRes?.data || []).map(m => m.status))];
     console.log('[predict.vlr debug] สถานะแมตช์ทั้งหมดที่ API หลักส่งมา:', rawStatuses);
     console.log('[predict.vlr debug] แมตช์ China ที่ backfill เพิ่มเข้ามา:', newChinaUpcoming);
+    console.log(`[predict.vlr debug] จำนวนผลแมตช์ที่ดึงมาได้ (state.results): ${state.results.length}`, state.results.slice(0, 5));
     console.table(
       [...new Map(state.upcoming.map(m => [m.match_event, m.category])).entries()]
         .map(([tournament, category]) => ({ tournament, category }))
@@ -383,11 +384,16 @@ function resolvePendingPredictions() {
   for (const key of Object.keys(state.data.predictions)) {
     const pred = state.data.predictions[key];
     if (pred.resolved) continue;
+    const norm = s => (s || '').trim().toLowerCase();
     const match = state.results.find(r =>
-      (r.match_page && r.match_page === key) ||
-      (r.team1 === pred.team1 && r.team2 === pred.team2)
+      (r.match_page && key && r.match_page === key) ||
+      (norm(r.team1) === norm(pred.team1) && norm(r.team2) === norm(pred.team2)) ||
+      (norm(r.team1) === norm(pred.team2) && norm(r.team2) === norm(pred.team1)) // เผื่อ API คืนลำดับทีมสลับข้าง
     );
     if (!match) {
+      // DEBUG: เปิด F12 -> Console เพื่อดูว่าทำไม prediction นี้ยังจับคู่กับผลไม่เจอ
+      // (ช่วยเช็คว่าชื่อทีม/ไอดีไม่ตรงกันแบบไหน)
+      console.log(`[predict.vlr debug] ยังหาผลไม่เจอสำหรับ: ${pred.team1} vs ${pred.team2} (key=${key})`);
       // หาผลแมตช์นี้ใน feed ปัจจุบันไม่เจอ (อาจยังไม่จบ หรือจบไปนานจนหลุด feed แล้ว)
       // prediction เก่าที่สร้างไว้ก่อนอัปเดตนี้จะไม่มี createdAt -> เริ่มนับอายุจาก "ตอนนี้" แทน
       // (กันไม่ให้ของเก่าที่ค้างอยู่แล้วโดนตัดสินว่า "หมดอายุ" ทันทีตั้งแต่รอบแรกที่เจอ)
@@ -408,8 +414,11 @@ function resolvePendingPredictions() {
       newlyResolved.push({ key, pred, outcome: 'expired' });
       continue;
     }
-    const s1 = parseInt(match.score1, 10);
-    const s2 = parseInt(match.score2, 10);
+    // ถ้า API คืนลำดับทีมสลับข้าง ต้องสลับสกอร์ให้ตรงมุมมอง pred.team1/pred.team2 ด้วย
+    // ไม่งั้นจะตัดสินผู้ชนะผิดฝั่ง (team1 ของ pred อาจไม่ใช่ team1 ของผลลัพธ์)
+    const isSwapped = norm(match.team1) === norm(pred.team2) && norm(match.team2) === norm(pred.team1);
+    const s1 = parseInt(isSwapped ? match.score2 : match.score1, 10);
+    const s2 = parseInt(isSwapped ? match.score1 : match.score2, 10);
     if (isNaN(s1) || isNaN(s2)) continue;
     const winner = s1 > s2 ? 'team1' : (s2 > s1 ? 'team2' : null);
     if (!winner) continue;
