@@ -387,7 +387,27 @@ function resolvePendingPredictions() {
       (r.match_page && r.match_page === key) ||
       (r.team1 === pred.team1 && r.team2 === pred.team2)
     );
-    if (!match) continue;
+    if (!match) {
+      // หาผลแมตช์นี้ใน feed ปัจจุบันไม่เจอ (อาจยังไม่จบ หรือจบไปนานจนหลุด feed แล้ว)
+      // prediction เก่าที่สร้างไว้ก่อนอัปเดตนี้จะไม่มี createdAt -> เริ่มนับอายุจาก "ตอนนี้" แทน
+      // (กันไม่ให้ของเก่าที่ค้างอยู่แล้วโดนตัดสินว่า "หมดอายุ" ทันทีตั้งแต่รอบแรกที่เจอ)
+      if (!pred.createdAt) {
+        pred.createdAt = Date.now();
+        changed = true;
+        continue;
+      }
+      const age = Date.now() - pred.createdAt;
+      if (age < STALE_PREDICTION_MS) continue; // ยังไม่นานพอ รอรอบถัดไป
+
+      // ค้างเกิน STALE_PREDICTION_DAYS วันแล้วยังหาผลไม่เจอ -> คืนเดิมพันเต็มจำนวน ไม่นับสถิติ
+      pred.resolved = true;
+      pred.correct = null; // ไม่รู้ผลจริง จึงไม่นับเป็นถูกหรือผิด
+      pred.reward = pred.bet || BET_COST;
+      state.data.points += pred.reward;
+      changed = true;
+      newlyResolved.push({ key, pred, outcome: 'expired' });
+      continue;
+    }
     const s1 = parseInt(match.score1, 10);
     const s2 = parseInt(match.score2, 10);
     if (isNaN(s1) || isNaN(s2)) continue;
@@ -459,7 +479,8 @@ function showMatchResultToast(pred, outcome) {
   const isMirror = outcome === 'score_mirror';
 
   let statusClass, statusLabel;
-  if (outcome === 'score_exact') { statusClass = 'toast-win'; statusLabel = '🎯 ทายสกอร์ถูกเป๊ะ!'; }
+  if (outcome === 'expired') { statusClass = 'toast-expired'; statusLabel = '⏳ หาผลไม่เจอ (ค้างนานเกินไป) คืนแต้มเต็ม'; }
+  else if (outcome === 'score_exact') { statusClass = 'toast-win'; statusLabel = '🎯 ทายสกอร์ถูกเป๊ะ!'; }
   else if (isMirror) { statusClass = 'toast-mirror'; statusLabel = '🔁 สกอร์ตรงแต่ทายทีมพลาด'; }
   else if (isWin) { statusClass = 'toast-win'; statusLabel = '✅ ทายถูก!'; }
   else { statusClass = 'toast-lose'; statusLabel = '❌ ทายผิด'; }
@@ -506,7 +527,7 @@ function makePrediction(matchKey, pick, team1, team2, event, rawBet, rawScorePic
   const predictedScore = (rawScorePick === '2-0' || rawScorePick === '2-1') ? rawScorePick : null;
 
   state.data.points -= bet;
-  state.data.predictions[matchKey] = { pick, team1, team2, event, bet, predictedScore, resolved: false, correct: null, reward: null };
+  state.data.predictions[matchKey] = { pick, team1, team2, event, bet, predictedScore, resolved: false, correct: null, reward: null, createdAt: Date.now() };
   persist();
   renderPredictTab();
   renderTopbar();
@@ -841,7 +862,9 @@ function matchCardHtml(match, kind) {
 
   let statusBadge = '';
   if (pred && pred.resolved) {
-    if (pred.predictedScore) {
+    if (pred.correct === null) {
+      statusBadge = `<span class="badge badge-expired">หาผลไม่เจอ · คืนเต็ม +${pred.reward}</span>`;
+    } else if (pred.predictedScore) {
       if (pred.correct && pred.reward >= pred.bet) {
         statusBadge = `<span class="badge badge-correct">ทายสกอร์ถูกเป๊ะ (${pred.predictedScore}) +${pred.reward}</span>`;
       } else if (!pred.correct && pred.reward === Math.round(pred.bet * SCORE_MIRROR_REFUND_RATE)) {
@@ -969,7 +992,7 @@ function renderPredictTab() {
       <div class="history-row">
         <span>${p.team1} vs ${p.team2}</span>
         <span class="history-pick">ทาย: ${p.pick === 'team1' ? p.team1 : p.team2} · เดิมพัน ${p.bet ?? BET_COST} PT${p.predictedScore ? ` · สกอร์ ${p.predictedScore}` : ''}</span>
-        <span>${p.resolved ? (p.correct ? `<span class="badge badge-correct">ถูก +${p.reward}</span>` : `<span class="badge badge-wrong">ผิด +${p.reward}</span>`) : '<span class="badge badge-pending">รอผล</span>'}</span>
+        <span>${p.resolved ? (p.correct === null ? `<span class="badge badge-expired">หมดอายุ +${p.reward}</span>` : (p.correct ? `<span class="badge badge-correct">ถูก +${p.reward}</span>` : `<span class="badge badge-wrong">ผิด +${p.reward}</span>`)) : '<span class="badge badge-pending">รอผล</span>'}</span>
       </div>`).join('');
   }
 }
