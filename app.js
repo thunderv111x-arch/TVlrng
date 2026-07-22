@@ -334,6 +334,137 @@ async function buildLogoMap() {
   return logoMapCache.map;
 }
 
+/* ---------------- team info modal (roster / rating / players) ---------------- */
+// ปุ่ม "ⓘ" บนการ์ดแมตช์ -> เปิด modal แสดงข้อมูลทีม: โลโก้, rating/rank, roster (ผู้เล่น+role+กัปตัน), ผลงานล่าสุด
+// ดึงจาก vlrggapi ตัวเดียวกัน (API_BASE) 2 ขั้นตอน: 1) /search หาไอดีทีมจากชื่อ 2) /team?id=..&q=profile ดึงโปรไฟล์
+//
+// หมายเหตุ: README ของ vlrggapi บอกว่า endpoint เดิม (ไม่ใช่ /v2) "mirror" โครงสร้างข้อมูลเดียวกับ v2
+// แต่ไม่ได้ยืนยันชัดว่า wrap ด้วย {"data":...} หรือ {"status":"success","data":...} เหมือนกันเป๊ะ
+// unwrapPayload() ด้านล่างเลยรองรับทั้งสองแบบกันพัง ถ้า instance ที่ self-host ไว้ตอบมาคนละฟอร์แมต
+
+// ชื่อทีม (lowercase) -> team id ของ vlr.gg (ได้จาก /search) ไม่ต้องหมดอายุเพราะไอดีทีมไม่เปลี่ยน
+const teamIdCache = new Map();
+// team id -> { data: profile, fetchedAt } cache กันยิงซ้ำเวลาเปิดดูทีมเดิมซ้ำๆ
+const teamProfileCache = new Map();
+const TEAM_PROFILE_TTL_MS = 30 * 60 * 1000; // 30 นาที
+let teamInfoRequestSeq = 0; // กันเคสกดเปิดทีม A แล้วรีบกดเปิดทีม B ก่อนทีม A โหลดเสร็จ ไม่ให้ผลของ A มา render ทับ B
+
+function unwrapPayload(res) {
+  if (!res) return null;
+  if (res.status === 'success' && res.data !== undefined) return res.data;
+  if (res.data !== undefined) return res.data;
+  return res;
+}
+
+async function findTeamId(teamName) {
+  const key = (teamName || '').trim().toLowerCase();
+  if (!key) return null;
+  if (teamIdCache.has(key)) return teamIdCache.get(key);
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/search?q=${encodeURIComponent(teamName)}`, FETCH_TIMEOUT_MS);
+    const payload = unwrapPayload(res);
+    const teams = payload?.segments?.results?.teams || payload?.results?.teams || payload?.teams || [];
+    // เลือกทีมที่ชื่อตรงเป๊ะก่อน (case-insensitive) ถ้าไม่มีค่อย fallback ไปผลลัพธ์แรกที่ API คืนมา
+    const exact = teams.find(t => (t.name || '').trim().toLowerCase() === key);
+    const picked = exact || teams[0] || null;
+    const id = picked ? picked.id : null;
+    teamIdCache.set(key, id);
+    return id;
+  } catch (e) {
+    console.warn('[predict.vlr debug] ค้นหา team id ไม่สำเร็จ:', teamName, e);
+    return null;
+  }
+}
+
+async function fetchTeamProfile(teamId) {
+  const cached = teamProfileCache.get(teamId);
+  if (cached && (Date.now() - cached.fetchedAt) < TEAM_PROFILE_TTL_MS) return cached.data;
+  const res = await fetchWithTimeout(`${API_BASE}/team?id=${encodeURIComponent(teamId)}&q=profile`, FETCH_TIMEOUT_MS);
+  const data = unwrapPayload(res);
+  if (data) teamProfileCache.set(teamId, { data, fetchedAt: Date.now() });
+  return data;
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function teamInfoErrorHtml(teamName) {
+  return `
+    <div class="team-info-header"><h3 class="team-info-name">${escapeHtml(teamName)}</h3></div>
+    <p class="team-info-error">⚠️ ดึงข้อมูลทีมนี้ไม่ได้ตอนนี้ — อาจหาทีมนี้ไม่เจอบน vlr.gg (เช่น ชื่อทีมสะกดคนละแบบ) หรือ API ล่มชั่วคราว</p>`;
+}
+
+function teamInfoHtml(profile, fallbackName) {
+  const info = profile.info || {};
+  const rating = profile.rating || {};
+  const roster = profile.roster || [];
+  const placements = profile.event_placements || [];
+  const rawLogo = info.logo || '';
+  const logo = rawLogo ? (rawLogo.startsWith('//') ? `https:${rawLogo}` : rawLogo) : PLACEHOLDER_LOGO;
+
+  const rosterHtml = roster.length ? roster.map(p => `
+    <div class="roster-card">
+      <img class="roster-avatar" src="${p.avatar || PLACEHOLDER_LOGO}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div class="roster-alias">${escapeHtml(p.alias)}${p.is_captain ? ' <span class="roster-captain" title="กัปตันทีม">★</span>' : ''}</div>
+      <div class="roster-role">${escapeHtml(p.role || '')}</div>
+    </div>`).join('') : '<p class="team-info-empty">ไม่มีข้อมูลผู้เล่น</p>';
+
+  const placementsHtml = placements.length ? `
+    <ul class="placement-list">
+      ${placements.slice(0, 8).map(pl => `
+        <li>
+          <span>${escapeHtml(pl.event || '')}</span>
+          <span class="placement-badge">${escapeHtml(pl.placement || '')}</span>
+          ${pl.prize ? `<span class="placement-prize">${escapeHtml(pl.prize)}</span>` : ''}
+        </li>`).join('')}
+    </ul>` : '<p class="team-info-empty">ยังไม่มีประวัติผลงาน</p>';
+
+  return `
+    <div class="team-info-header">
+      <img class="team-info-logo" src="${logo}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div>
+        <h3 class="team-info-name">${escapeHtml(info.name || fallbackName)}${info.tag ? ` <span class="team-info-tag">[${escapeHtml(info.tag)}]</span>` : ''}</h3>
+        <p class="team-info-country">${escapeHtml(info.country || '')}</p>
+        <div class="team-info-rating-row">
+          ${rating.vlr_rating ? `<span class="team-info-stat">RATING <strong>${escapeHtml(rating.vlr_rating)}</strong></span>` : ''}
+          ${rating.rank ? `<span class="team-info-stat">RANK <strong>#${escapeHtml(rating.rank)}</strong></span>` : ''}
+          ${rating.region ? `<span class="team-info-stat">REGION <strong>${escapeHtml(String(rating.region).toUpperCase())}</strong></span>` : ''}
+        </div>
+      </div>
+    </div>
+    ${profile.total_winnings ? `<p class="team-info-winnings">รายได้รวม: <strong>${escapeHtml(profile.total_winnings)}</strong></p>` : ''}
+    <h4 class="team-info-subtitle">รายชื่อผู้เล่น</h4>
+    <div class="roster-grid">${rosterHtml}</div>
+    <h4 class="team-info-subtitle">ผลงานล่าสุด</h4>
+    ${placementsHtml}`;
+}
+
+async function openTeamInfo(teamName) {
+  const overlay = document.getElementById('team-info-overlay');
+  const body = document.getElementById('team-info-body');
+  const mySeq = ++teamInfoRequestSeq;
+  body.innerHTML = `<p class="team-info-loading">กำลังโหลดข้อมูล ${escapeHtml(teamName)} ...</p>`;
+  overlay.classList.add('open');
+
+  try {
+    const teamId = await findTeamId(teamName);
+    if (mySeq !== teamInfoRequestSeq) return; // ผู้ใช้เปิดทีมอื่นไปแล้วระหว่างรอ ไม่ต้อง render ทับ
+    if (!teamId) { body.innerHTML = teamInfoErrorHtml(teamName); return; }
+    const profile = await fetchTeamProfile(teamId);
+    if (mySeq !== teamInfoRequestSeq) return;
+    if (!profile || !profile.info) { body.innerHTML = teamInfoErrorHtml(teamName); return; }
+    body.innerHTML = teamInfoHtml(profile, teamName);
+  } catch (e) {
+    console.warn('[predict.vlr debug] เปิดข้อมูลทีมไม่สำเร็จ:', teamName, e);
+    if (mySeq === teamInfoRequestSeq) body.innerHTML = teamInfoErrorHtml(teamName);
+  }
+}
+
+function closeTeamInfo() {
+  document.getElementById('team-info-overlay').classList.remove('open');
+}
+
 function normalizeMatch(m, logoMap) {
   const tournamentName = m.match_event || '';
   const lookupLogo = name => (logoMap && logoMap.get((name || '').trim().toLowerCase())) || PLACEHOLDER_LOGO;
@@ -968,17 +1099,25 @@ function matchCardHtml(match, kind) {
       <span>${match.match_series || ''}</span>
     </div>
     <div class="match-teams">
-      <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
-        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
-        <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-        <span class="team-name">${match.team1}</span>
-      </button>
+      <div class="team-slot">
+        <button class="team-pick ${pickedTeam1 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
+          onclick="makePrediction('${key.replace(/'/g, "\\'")}','team1','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
+          <img class="team-logo" src="${logo1}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+          <span class="team-name">${match.team1}</span>
+        </button>
+        <button type="button" class="team-info-btn" title="ข้อมูลทีม ${(match.team1 || '').replace(/"/g, '&quot;')}"
+          onclick="event.stopPropagation(); openTeamInfo('${(match.team1||'').replace(/'/g,"\\'")}')">ⓘ</button>
+      </div>
       <span class="vs">VS</span>
-      <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
-        onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
-        <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-        <span class="team-name">${match.team2}</span>
-      </button>
+      <div class="team-slot">
+        <button class="team-pick ${pickedTeam2 ? 'picked' : ''}" ${locked || !canAfford ? 'disabled' : ''}
+          onclick="makePrediction('${key.replace(/'/g, "\\'")}','team2','${(match.team1||'').replace(/'/g,"\\'")}','${(match.team2||'').replace(/'/g,"\\'")}','${(match.match_event||'').replace(/'/g,"\\'")}',${getBetJs},${getScoreJs})">
+          <img class="team-logo" src="${logo2}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+          <span class="team-name">${match.team2}</span>
+        </button>
+        <button type="button" class="team-info-btn" title="ข้อมูลทีม ${(match.team2 || '').replace(/"/g, '&quot;')}"
+          onclick="event.stopPropagation(); openTeamInfo('${(match.team2||'').replace(/'/g,"\\'")}')">ⓘ</button>
+      </div>
     </div>
     ${betPicker}
     <div class="match-footer">
@@ -1153,5 +1292,8 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('signout-btn').addEventListener('click', signOut);
   document.getElementById('case-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'case-overlay') closeCaseOverlay();
+  });
+  document.getElementById('team-info-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'team-info-overlay') closeTeamInfo();
   });
 });
