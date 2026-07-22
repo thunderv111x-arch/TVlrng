@@ -286,21 +286,17 @@ body::before {
 
 /* ---------------- Team info overlay (roster / rating / players) ---------------- */
 
-.team-info-overlay {
-  display: none; position: fixed; inset: 0; background: rgba(4,5,7,0.92);
-  z-index: 1000; align-items: center; justify-content: center; padding: 20px;
-}
-.team-info-overlay.open { display: flex; }
-.team-info-modal {
-  width: min(560px, 100%); max-height: 86vh; overflow-y: auto;
-  background: var(--bg-panel); border: 1px solid var(--border); padding: 24px; position: relative;
-}
-.team-info-close {
-  position: absolute; top: 12px; right: 12px; width: 28px; height: 28px;
+.team-info-page { max-width: 640px; margin: 0 auto; }
+.team-info-back-btn {
+  display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px;
   background: var(--bg-panel-2); border: 1px solid var(--border); color: var(--text);
-  border-radius: 3px; cursor: pointer; font-size: 13px; line-height: 1;
+  border-radius: 3px; cursor: pointer; font-size: 13px; padding: 8px 14px;
+  font-family: 'Rajdhani', sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
 }
-.team-info-close:hover { border-color: var(--accent); color: var(--accent); }
+.team-info-back-btn:hover { border-color: var(--accent); color: var(--accent); }
+.team-info-body {
+  background: var(--bg-panel); border: 1px solid var(--border); padding: 24px;
+}
 
 .team-info-loading, .team-info-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 20px 0; }
 .team-info-error { color: var(--accent); font-size: 13px; padding: 12px 0; }
