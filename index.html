@@ -26,6 +26,7 @@
       <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">โปรไฟล์</button>
     </nav>
     <div class="auth-area">
+      <a class="feedback-btn" href="mailto:xdgf9212@gmail.com?subject=%E0%B9%81%E0%B8%88%E0%B9%89%E0%B8%87%E0%B8%9B%E0%B8%B1%E0%B8%8D%E0%B8%AB%E0%B8%B2%20PREDICT.VLR" title="แจ้งปัญหา / ส่ง Comment">🛠︎ แจ้งปัญหาและ Comment</a>
       <div id="g_signin_btn"></div>
       <div id="user-box" class="user-box" style="display:none">
         <img id="user-avatar" class="user-avatar" alt="">
@@ -169,7 +170,7 @@
         <div class="transfer-form">
           <input type="email" id="transfer-email" class="transfer-input" placeholder="อีเมลผู้รับ เช่น friend@gmail.com">
           <input type="number" id="transfer-amount" class="transfer-input transfer-amount" placeholder="จำนวนแต้ม" min="5" step="5">
-          <button class="transfer-btn" onclick="transferPoints()">โอนแต้ม</button>
+          <button class="transfer-btn" id="transfer-btn" onclick="transferPoints()">โอนแต้ม</button>
         </div>
         <div id="transfer-log" class="history-list"></div>
       </div>
