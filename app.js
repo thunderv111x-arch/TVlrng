@@ -321,8 +321,30 @@ async function linkFirebaseAuth(idToken) {
     const user = await fb.signInWithGoogleIdToken(idToken);
     state.fbUid = user.uid;
     pushProfileToFirestore(true); // sync ทันทีรอบแรกหลังล็อกอิน ไม่ต้องรอ debounce
+    await claimFirestorePendingTransfers();
   } catch (e) {
     console.warn('[firebase] เชื่อมต่อ Firebase Auth ไม่สำเร็จ (leaderboard/โปรไฟล์สาธารณะจะยังไม่อัปเดต):', e);
+  }
+}
+
+// เช็ค/รับแต้มที่เพื่อนโอนมาค้างไว้ให้อีเมลเรา (ก่อนที่เราจะเคย login/link Firebase มาก่อน)
+// ต่างจาก applyPendingTransfers() (ของเดิม, localStorage-only) ตรงที่อันนี้เก็บบน Firestore
+// จึงข้ามอุปกรณ์/เบราว์เซอร์ได้จริง ตราบใดที่รู้ uid + email ของบัญชีที่ล็อกอินอยู่
+async function claimFirestorePendingTransfers() {
+  if (!state.fbUid || !state.user || !state.data || !window.fb) return;
+  try {
+    const result = await window.fb.claimPendingTransfers(state.fbUid, state.user.email.toLowerCase());
+    if (!result || !result.total) return;
+    state.data.points += result.total;
+    result.items.forEach(item => {
+      state.data.transferLog.unshift({ type: 'received', amount: item.amount, counterpart: item.fromName || 'เพื่อน', date: todayKey() });
+    });
+    persist();
+    renderTopbar();
+    renderProfileTab();
+    alert(`📩 มีแต้มที่เพื่อนโอนค้างไว้ให้คุณ ได้รับรวม +${result.total} แต้ม!`);
+  } catch (e) {
+    console.warn('[firebase] เช็คแต้มค้างรับไม่สำเร็จ:', e);
   }
 }
 
@@ -338,6 +360,7 @@ function pushProfileToFirestore(immediate = false) {
     window.fb.syncMyProfile(state.fbUid, {
       displayName: displayName(),
       avatarUrl: displayAvatar(),
+      emailLower: state.user.email.toLowerCase(), // ใช้ค้นหา uid ตอนโอนแต้มด้วยอีเมล
       points: state.data.points || 0,
       totalPredictions: total,
       correctPredictions: correct,
@@ -1130,11 +1153,16 @@ function closeCaseOverlay() {
 
 /* ---------------- point transfer ---------------- */
 
-function transferPoints() {
+// ---- โอนแต้ม: ใช้ uid จาก Firebase Auth เป็นตัวอ้างอิงจริง (players/{uid} บน Firestore) ----
+// ต่างจากของเดิมที่ใช้ localStorage registry (อีเมล -> sub) ซึ่งใช้ได้แค่ "เบราว์เซอร์เดียวกัน"
+// อันนี้ค้นหาผู้รับจาก emailLower ที่ sync ไว้บน Firestore แล้วโอนแต้มด้วย transaction แบบ atomic
+// จึงข้ามอุปกรณ์/เบราว์เซอร์ได้จริง ไม่ว่าผู้รับจะล็อกอินที่ไหนก็ตาม
+async function transferPoints() {
   if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะโอนแต้มได้'); return; }
 
   const emailInput = document.getElementById('transfer-email');
   const amountInput = document.getElementById('transfer-amount');
+  const btn = document.getElementById('transfer-btn');
   const email = (emailInput.value || '').trim().toLowerCase();
   const amount = parseInt(amountInput.value, 10);
 
@@ -1143,37 +1171,54 @@ function transferPoints() {
   if (isNaN(amount) || amount < MIN_TRANSFER) { alert(`โอนขั้นต่ำ ${MIN_TRANSFER} แต้ม`); return; }
   if (amount > state.data.points) { alert(`แต้มไม่พอ (มีอยู่ ${state.data.points} แต้ม)`); return; }
 
-  const registry = loadRegistry();
-  const target = registry[email];
-
-  state.data.points -= amount;
-
-  if (target && target.sub !== state.user.sub) {
-    // ผู้รับเคยล็อกอินบนเบราว์เซอร์นี้แล้ว -> โอนเข้าบัญชีได้ทันที
-    const targetData = loadUserData(target.sub);
-    targetData.points += amount;
-    targetData.transferLog = targetData.transferLog || [];
-    targetData.transferLog.unshift({ type: 'received', amount, counterpart: state.user.name, date: todayKey() });
-    localStorage.setItem(saveKey(target.sub), JSON.stringify(targetData));
-
-    state.data.transferLog.unshift({ type: 'sent', amount, counterpart: target.name || email, date: todayKey() });
-    alert(`✅ โอน ${amount} แต้ม ให้ ${target.name || email} สำเร็จ!`);
-  } else {
-    // ยังไม่เจอบัญชีนี้บนเบราว์เซอร์นี้ -> พักแต้มไว้ก่อน จะได้รับอัตโนมัติตอนเขาล็อกอินบนเครื่องนี้
-    const pending = loadPendingTransfers();
-    if (!pending[email]) pending[email] = [];
-    pending[email].push({ amount, fromName: state.user.name, fromEmail: state.user.email, date: todayKey() });
-    savePendingTransfers(pending);
-
-    state.data.transferLog.unshift({ type: 'sent', amount, counterpart: email, date: todayKey() });
-    alert(`⏳ ยังไม่เจอบัญชีอีเมลนี้บนเบราว์เซอร์นี้เลย ระบบพัก ${amount} แต้มไว้ให้แล้ว จะเข้าบัญชีอัตโนมัติเมื่อ ${email} ล็อกอินบน "เบราว์เซอร์/อุปกรณ์เครื่องนี้" (เว็บนี้ยังไม่มีเซิร์ฟเวอร์กลาง จึงข้ามอุปกรณ์ไม่ได้)`);
+  if (!window.fb || !state.fbUid) {
+    alert('ระบบโอนแต้มต้องเชื่อมต่อ Firebase ก่อน กรุณารอสักครู่ (หรือรีเฟรชหน้าเว็บ) แล้วลองใหม่');
+    return;
   }
 
-  persist();
-  emailInput.value = '';
-  amountInput.value = '';
-  renderProfileTab();
-  renderTopbar();
+  if (btn) { btn.disabled = true; btn.textContent = 'กำลังโอน...'; }
+
+  try {
+    const target = await window.fb.findPlayerByEmail(email);
+
+    if (target && target.uid === state.fbUid) {
+      alert('โอนแต้มให้ตัวเองไม่ได้');
+      return;
+    }
+
+    if (target) {
+      // เจอ uid ของผู้รับบน Firestore แล้ว (ไม่ว่าจะเคยล็อกอินจากอุปกรณ์ไหนก็ตาม) -> โอนทันทีแบบ atomic
+      await window.fb.transferPointsByUid(state.fbUid, target.uid, amount, {
+        fromName: displayName(),
+        toName: target.displayName || email,
+      });
+      state.data.points -= amount;
+      state.data.transferLog.unshift({ type: 'sent', amount, counterpart: target.displayName || email, date: todayKey() });
+      alert(`✅ โอน ${amount} แต้ม ให้ ${target.displayName || email} สำเร็จ!`);
+    } else {
+      // ยังไม่เจออีเมลนี้บน Firestore (ยังไม่เคยล็อกอิน/เชื่อมต่อ Firebase มาก่อน)
+      // พักแต้มไว้บนคลาวด์ (ไม่ใช่ localStorage) จะเข้าบัญชีอัตโนมัติทันทีที่อีเมลนี้ล็อกอินครั้งแรก ไม่ว่าอุปกรณ์ไหน
+      await window.fb.queuePendingTransfer(email, { amount, fromName: displayName(), fromUid: state.fbUid });
+      state.data.points -= amount;
+      state.data.transferLog.unshift({ type: 'sent', amount, counterpart: email, date: todayKey() });
+      alert(`⏳ ยังไม่เจอบัญชีอีเมลนี้ในระบบเลย ระบบพัก ${amount} แต้มไว้บนคลาวด์ให้แล้ว จะเข้าบัญชีอัตโนมัติทันทีที่ ${email} ล็อกอินครั้งแรก (ข้ามอุปกรณ์ได้ปกติ)`);
+    }
+
+    persist();
+    emailInput.value = '';
+    amountInput.value = '';
+    renderProfileTab();
+    renderTopbar();
+  } catch (e) {
+    console.error('[transfer] โอนแต้มไม่สำเร็จ:', e);
+    if (String(e && e.message).includes('INSUFFICIENT_POINTS')) {
+      alert('แต้มไม่พอโอน (แต้มอาจเพิ่งเปลี่ยนแปลงจากอีกอุปกรณ์) ลองรีเฟรชหน้าแล้วเช็คแต้มอีกครั้ง');
+    } else {
+      alert('โอนแต้มไม่สำเร็จ ลองใหม่อีกครั้ง (เช็คการเชื่อมต่ออินเทอร์เน็ต)');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'โอนแต้ม'; }
+  }
 }
 
 /* ---------------- redeem codes ---------------- */
