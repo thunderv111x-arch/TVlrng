@@ -155,6 +155,14 @@
       <h3 class="subsection-title">แท็กโปรไฟล์</h3>
       <div id="tag-grid" class="inv-grid tag-grid"></div>
 
+      <h3 class="subsection-title">ร้านแท็กทีมโปรด</h3>
+      <p class="redeem-note">เลือกทีมที่เชียร์ ซื้อแท็ก "realfan [ชื่อทีม]" พร้อมโลโก้จริงจาก vlr.gg ราคา <strong>10,000</strong> แต้ม/ทีม — ซื้อได้หลายทีม สวมใส่ได้ทีละ 1 อัน</p>
+      <div class="redeem-form">
+        <input type="text" id="team-tag-search" class="redeem-input" placeholder="ค้นหาชื่อทีม เช่น Paper Rex" autocomplete="off" oninput="renderTeamTagShop(this.value)">
+      </div>
+      <div id="team-tag-shop-status" class="leaderboard-status"></div>
+      <div id="team-tag-shop-grid" class="inv-grid tag-grid"></div>
+
       <h3 class="subsection-title">โอนแต้มให้เพื่อน</h3>
       <div class="transfer-card">
         <p class="transfer-note">กรอกอีเมล Google ของผู้รับ — ระบบนี้เก็บข้อมูลไว้ในเบราว์เซอร์เท่านั้น (ไม่มีเซิร์ฟเวอร์กลาง) ดังนั้นแต้มจะโอนเข้าบัญชีจริงเมื่อผู้รับเคย หรือจะเข้าสู่ระบบ "บนเบราว์เซอร์/อุปกรณ์เครื่องนี้" เท่านั้น</p>
@@ -192,7 +200,7 @@
 </div>
 
 <script type="module" src="firebase-init.js?v=1"></script>
-<script src="data.js?v=3"></script>
-<script src="app.js?v=7"></script>
+<script src="data.js?v=4"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
