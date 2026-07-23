@@ -84,7 +84,7 @@ const FETCH_TIMEOUT_MS = 6000;
 // ดึงหลายภูมิภาคพร้อมกันให้ครอบคลุมทุกลีกที่เว็บนี้แสดง แล้ว cache ผลไว้ฝั่ง client กันยิงรัว ๆ ทุก 5 นาที
 const RANKING_REGIONS = ['na', 'eu', 'ap', 'la', 'la-s', 'la-n', 'oce', 'kr', 'mn', 'gc', 'br', 'cn', 'jp', 'col'];
 const LOGO_MAP_TTL_MS = 60 * 60 * 1000; // cache แผนที่โลโก้ไว้ 1 ชม. (ฝั่ง API เองก็ cache /rankings ไว้ 1 ชม. อยู่แล้ว)
-let logoMapCache = { map: new Map(), builtAt: 0 };
+let logoMapCache = { map: new Map(), names: new Map(), builtAt: 0 };
 
 // เดิมเว็บนี้ล็อกไว้แค่ VCT Pacific เท่านั้น ตอนนี้เปลี่ยนเป็นดึงมาทุกลีก
 // แล้วให้ผู้ใช้เลือกดูเองผ่านตัวกรองลีกในหน้า "ทายผล" แทน
@@ -179,7 +179,8 @@ function defaultUserData() {
     equippedFrame: 'frame_default',
     equippedTheme: 'theme_tactical',
     ownedTags: [],         // แท็กโปรไฟล์ที่ปลดล็อกแล้ว (ได้จากโค้ดเท่านั้น)
-    equippedTag: null,     // id ของแท็กที่กำลังสวมอยู่ (null = ไม่ใส่)
+    ownedTeamTags: [],     // แท็กทีมที่ซื้อด้วยแต้ม [{ id, name, logo }] — คนละชุดกับ ownedTags (โค้ดเท่านั้น)
+    equippedTag: null,     // id ของแท็กที่กำลังสวมอยู่ (null = ไม่ใส่) ใช้ร่วมกันทั้ง ownedTags และ ownedTeamTags
     redeemedCodes: [],     // โค้ดที่เคยกรอกไปแล้ว (เก็บเป็นตัวพิมพ์เล็กทั้งหมด) กันกรอกซ้ำ
     predictions: {},     // match_page -> { pick:'team1'|'team2', team1, team2, event, bet, resolved, correct, reward }
     stats: { total: 0, correct: 0 },
@@ -330,6 +331,10 @@ function pushProfileToFirestore(immediate = false) {
   if (!state.fbUid || !state.data || !window.fb) return;
   const doSync = () => {
     const { total, correct } = state.data.stats || { total: 0, correct: 0 };
+    // ถ้าแท็กที่สวมอยู่เป็น "แท็กทีม" (ซื้อด้วยแต้ม ไม่ใช่โค้ด) ต้องแนบชื่อ/โลโก้ไปด้วย
+    // เพราะ client คนอื่นที่ดู leaderboard/โปรไฟล์สาธารณะ ไม่มีทางรู้ชื่อ/โลโก้ทีมนี้จาก id เฉยๆ
+    // (TAG_CATALOG เป็น static list ที่ทุกคนมีเหมือนกัน แต่แท็กทีมเป็นข้อมูลไดนามิกที่ผู้ซื้อรู้เองคนเดียว)
+    const equippedTeamTag = (state.data.ownedTeamTags || []).find(t => t.id === state.data.equippedTag);
     window.fb.syncMyProfile(state.fbUid, {
       displayName: displayName(),
       avatarUrl: displayAvatar(),
@@ -338,6 +343,8 @@ function pushProfileToFirestore(immediate = false) {
       correctPredictions: correct,
       equippedFrame: state.data.equippedFrame,
       equippedTag: state.data.equippedTag,
+      equippedTeamTagName: equippedTeamTag ? equippedTeamTag.name : null,
+      equippedTeamTagLogo: equippedTeamTag ? equippedTeamTag.logo : null,
     }).catch(e => console.warn('[firebase] sync โปรไฟล์ไม่สำเร็จ:', e));
   };
   clearTimeout(profileSyncTimer);
@@ -460,12 +467,14 @@ async function buildLogoMap() {
   }
 
   const map = new Map();
+  const names = new Map(); // key (lowercase) -> ชื่อทีมตัวพิมพ์จริงตามที่ API ส่งมา ใช้โชว์ในหน้าร้านแท็กทีม
   const addLogo = (name, logo) => {
     if (!name || !logo) return;
     const key = name.trim().toLowerCase();
     if (!key || map.has(key)) return;
     // บาง URL จาก vlr.gg ขึ้นต้นด้วย "//" (protocol-relative) เติม https: ให้ก่อนใช้เป็น src รูป
     map.set(key, logo.startsWith('//') ? `https:${logo}` : logo);
+    names.set(key, name.trim());
   };
   // "last_played_team" ในผลลัพธ์ /rankings จะมีคำนำหน้า "vs. " ติดมาด้วย เช่น "vs. Evil Geniuses" ต้องตัดออกก่อน
   const stripVsPrefix = (name) => (name || '').replace(/^vs\.?\s*/i, '');
@@ -484,7 +493,7 @@ async function buildLogoMap() {
   });
 
   if (map.size) {
-    logoMapCache = { map, builtAt: now };
+    logoMapCache = { map, names, builtAt: now };
     return map;
   }
   // ถ้ารอบนี้ดึงไม่สำเร็จเลยสักภูมิภาค ใช้แคชเก่า (ถ้ามี) ดีกว่าไม่มีโลโก้เลย
@@ -1285,11 +1294,12 @@ function renderTagGrid() {
   const grid = document.getElementById('tag-grid');
   if (!grid || !state.data) return;
   const owned = state.data.ownedTags || [];
-  if (!owned.length) {
-    grid.innerHTML = '<p class="empty">ยังไม่มีแท็ก — ปลดล็อกได้ด้วยโค้ดพิเศษ</p>';
+  const ownedTeams = state.data.ownedTeamTags || [];
+  if (!owned.length && !ownedTeams.length) {
+    grid.innerHTML = '<p class="empty">ยังไม่มีแท็ก — ปลดล็อกด้วยโค้ดพิเศษ หรือซื้อแท็กทีมด้านล่างด้วยแต้ม</p>';
     return;
   }
-  grid.innerHTML = owned.map(id => {
+  const codeTagsHtml = owned.map(id => {
     const tag = TAG_CATALOG.find(t => t.id === id);
     if (!tag) return '';
     const equipped = state.data.equippedTag === id;
@@ -1302,6 +1312,115 @@ function renderTagGrid() {
       <button class="inv-equip-btn" onclick="${equipped ? 'unequipTag()' : `equipTag('${tag.id}')`}">${equipped ? 'เลิกใส่' : 'สวมใส่'}</button>
     </div>`;
   }).join('');
+  const teamTagsHtml = ownedTeams.map(t => {
+    const equipped = state.data.equippedTag === t.id;
+    return `
+    <div class="inv-item ${equipped ? 'equipped' : ''}">
+      <div class="tag-preview tag-team">
+        <img class="tag-preview-logo" src="${t.logo || PLACEHOLDER_LOGO}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="tag-preview-name">${escapeHtml(t.name)}</span>
+        <span class="tag-preview-text">realfan ${escapeHtml(t.name)}</span>
+      </div>
+      <button class="inv-equip-btn" onclick="${equipped ? 'unequipTag()' : `equipTag('${t.id}')`}">${equipped ? 'เลิกใส่' : 'สวมใส่'}</button>
+    </div>`;
+  }).join('');
+  grid.innerHTML = codeTagsHtml + teamTagsHtml;
+}
+
+/* ---------------- team fan tags: shop (ซื้อด้วยแต้ม, โลโก้ดึงสดจาก vlr.gg) ---------------- */
+
+// แปลงชื่อทีมเป็น id คงที่ เช่น "Paper Rex" -> "tag_team_paper-rex"
+function teamTagId(teamName) {
+  const slug = (teamName || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `tag_team_${slug}`;
+}
+
+let teamTagShopLoaded = false; // กัน buildLogoMap() ยิงซ้ำถ้าเปิดหน้าโปรไฟล์หลายรอบ (มี TTL cache ของตัวเองอยู่แล้วเช่นกัน)
+
+async function ensureTeamTagShop(filterText = '') {
+  const statusEl = document.getElementById('team-tag-shop-status');
+  const grid = document.getElementById('team-tag-shop-grid');
+  if (!grid) return;
+  if (!teamTagShopLoaded) {
+    if (statusEl) statusEl.textContent = 'กำลังโหลดรายชื่อทีม...';
+    try {
+      await buildLogoMap();
+      teamTagShopLoaded = true;
+      if (statusEl) statusEl.textContent = '';
+    } catch (e) {
+      if (statusEl) statusEl.textContent = 'โหลดรายชื่อทีมไม่สำเร็จ ลองรีเฟรชใหม่อีกครั้ง';
+      console.warn('[team-tag-shop] โหลดรายชื่อทีมไม่สำเร็จ:', e);
+      return;
+    }
+  }
+  renderTeamTagShop(filterText);
+}
+
+function renderTeamTagShop(filterText = '') {
+  const grid = document.getElementById('team-tag-shop-grid');
+  if (!grid || !state.data) return;
+  const q = filterText.trim().toLowerCase();
+  const ownedIds = new Set((state.data.ownedTeamTags || []).map(t => t.id));
+  let entries = [...logoMapCache.names.entries()] // [key, ชื่อทีมตัวพิมพ์จริง]
+    .map(([key, name]) => ({ key, name, logo: logoMapCache.map.get(key) }))
+    .filter(t => !q || t.key.includes(q));
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  if (q) entries = entries.slice(0, 60); // จำกัดผลค้นหาไม่ให้ยาวเกินไป
+  else entries = entries.slice(0, 30);   // ไม่ค้นหา: โชว์ตัวอย่างพอหอมปากหอมคอ ให้พิมพ์ค้นหาต่อเอา
+
+  if (!entries.length) {
+    grid.innerHTML = `<p class="empty">ไม่พบชื่อทีมที่ตรงกับ "${escapeHtml(filterText)}"</p>`;
+    return;
+  }
+
+  grid.innerHTML = entries.map(t => {
+    const id = teamTagId(t.name);
+    const owned = ownedIds.has(id);
+    const equipped = state.data.equippedTag === id;
+    const btnLabel = equipped ? 'เลิกใส่' : owned ? 'สวมใส่' : `ซื้อ ${TEAM_TAG_PRICE.toLocaleString()} PT`;
+    const btnClick = equipped
+      ? 'unequipTag()'
+      : owned
+        ? `equipTag('${id}')`
+        : `buyTeamTag('${t.key.replace(/'/g, "\\'")}')`;
+    return `
+    <div class="inv-item ${equipped ? 'equipped' : ''}">
+      <div class="tag-preview tag-team">
+        <img class="tag-preview-logo" src="${t.logo || PLACEHOLDER_LOGO}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="tag-preview-name">${escapeHtml(t.name)}</span>
+        <span class="tag-preview-text">realfan ${escapeHtml(t.name)}</span>
+      </div>
+      <button class="inv-equip-btn" onclick="${btnClick}">${btnLabel}</button>
+    </div>`;
+  }).join('');
+}
+
+async function buyTeamTag(key) {
+  if (!state.user || !state.data) { alert('เข้าสู่ระบบด้วย Google ก่อนถึงจะซื้อแท็กได้'); return; }
+  // เผื่อ logoMap หมดอายุ/ยังไม่โหลดตอนนี้พอดี ต่อให้เพิ่งเปิดหน้าเว็บมาสดๆ ก็ยังซื้อได้
+  if (!logoMapCache.names.size) await buildLogoMap();
+  const name = logoMapCache.names.get(key);
+  const logo = logoMapCache.map.get(key);
+  if (!name) { alert('ไม่พบทีมนี้ในระบบแล้ว ลองรีเฟรชหน้าใหม่'); return; }
+
+  const id = teamTagId(name);
+  state.data.ownedTeamTags = state.data.ownedTeamTags || [];
+  if (state.data.ownedTeamTags.some(t => t.id === id)) return; // มีอยู่แล้ว กันซื้อซ้ำ
+
+  if ((state.data.points || 0) < TEAM_TAG_PRICE) {
+    alert(`แต้มไม่พอ ต้องใช้ ${TEAM_TAG_PRICE.toLocaleString()} PT (คุณมี ${(state.data.points || 0).toLocaleString()} PT)`);
+    return;
+  }
+  if (!confirm(`ซื้อแท็ก "realfan ${name}" ราคา ${TEAM_TAG_PRICE.toLocaleString()} แต้ม?`)) return;
+
+  state.data.points -= TEAM_TAG_PRICE;
+  state.data.ownedTeamTags.push({ id, name, logo });
+  if (!state.data.equippedTag) state.data.equippedTag = id; // ใส่ให้อัตโนมัติถ้ายังไม่มีแท็กอื่นสวมอยู่
+  persist();
+  renderTopbar();
+  renderProfileTab();
+  renderTeamTagShop(document.getElementById('team-tag-search')?.value || '');
+  alert(`🎉 ซื้อแท็ก "realfan ${name}" สำเร็จ! ไปสวมใส่ได้ที่แท็บโปรไฟล์`);
 }
 
 /* ---------------- profile ---------------- */
@@ -1647,15 +1766,21 @@ function renderProfileTab() {
 
   const tagBadge = document.getElementById('profile-tag-badge');
   const equippedTag = TAG_CATALOG.find(t => t.id === state.data.equippedTag);
+  const equippedTeamTag = (state.data.ownedTeamTags || []).find(t => t.id === state.data.equippedTag);
   if (equippedTag) {
     tagBadge.className = 'profile-tag-badge ' + equippedTag.css;
     tagBadge.innerHTML = `<span class="profile-tag-name">${equippedTag.name}</span><span class="profile-tag-text">${equippedTag.text}</span>`;
+    tagBadge.style.display = 'inline-flex';
+  } else if (equippedTeamTag) {
+    tagBadge.className = 'profile-tag-badge tag-team';
+    tagBadge.innerHTML = `<img class="profile-tag-logo" src="${equippedTeamTag.logo || PLACEHOLDER_LOGO}" alt="" onerror="this.style.visibility='hidden'"><span class="profile-tag-name">${escapeHtml(equippedTeamTag.name)}</span><span class="profile-tag-text">realfan ${escapeHtml(equippedTeamTag.name)}</span>`;
     tagBadge.style.display = 'inline-flex';
   } else {
     tagBadge.style.display = 'none';
     tagBadge.innerHTML = '';
   }
   renderTagGrid();
+  ensureTeamTagShop(document.getElementById('team-tag-search')?.value || '');
 
   const nameInput = document.getElementById('edit-name-input');
   if (nameInput && document.activeElement !== nameInput) nameInput.value = state.data.customName || '';
@@ -1728,6 +1853,10 @@ function renderLeaderboardRows(rows) {
     const acc = total ? Math.round((correct / total) * 100) + '%' : '—';
     const isMe = row.uid === state.fbUid;
     const tag = TAG_CATALOG.find(t => t.id === row.equippedTag);
+    // แท็กทีม (ซื้อด้วยแต้ม) ไม่ได้อยู่ใน TAG_CATALOG แบบ static — ต้องอ่านชื่อ/โลโก้ที่ sync มาคู่กันแทน
+    const teamTagHtml = (!tag && row.equippedTeamTagName)
+      ? `<span class="leaderboard-tag tag-team-inline">${row.equippedTeamTagLogo ? `<img src="${row.equippedTeamTagLogo}" alt="" onerror="this.style.display='none'">` : ''}realfan ${escapeHtml(row.equippedTeamTagName)}</span>`
+      : '';
     return `
     <div class="leaderboard-row${isMe ? ' leaderboard-row-me' : ''}" onclick="openPublicProfile('${row.uid}')">
       <span class="leaderboard-rank${rank <= 3 ? ' leaderboard-rank-top' : ''}">#${rank}</span>
@@ -1736,7 +1865,7 @@ function renderLeaderboardRows(rows) {
       </div>
       <div class="leaderboard-name-col">
         <span class="leaderboard-name">${escapeHtml(row.displayName || 'ไม่ทราบชื่อ')}${isMe ? ' <span class="leaderboard-me-badge">คุณ</span>' : ''}</span>
-        ${tag ? `<span class="leaderboard-tag ${tag.css}">${tag.text}</span>` : ''}
+        ${tag ? `<span class="leaderboard-tag ${tag.css}">${tag.text}</span>` : teamTagHtml}
       </div>
       <span class="leaderboard-acc">${acc}</span>
       <span class="leaderboard-points">${row.points || 0} PT</span>
@@ -1768,6 +1897,9 @@ async function openPublicProfile(uid) {
     if (!profile) { body.innerHTML = '<p class="team-info-error">ไม่พบโปรไฟล์นี้ (อาจถูกลบ หรือยังไม่เคยเล่น)</p>'; return; }
     const frame = FRAME_CATALOG.find(f => f.id === profile.equippedFrame) || FRAME_CATALOG[0];
     const tag = TAG_CATALOG.find(t => t.id === profile.equippedTag);
+    const teamTagBadgeHtml = (!tag && profile.equippedTeamTagName)
+      ? `<span class="profile-tag-badge tag-team">${profile.equippedTeamTagLogo ? `<img class="profile-tag-logo" src="${profile.equippedTeamTagLogo}" alt="" onerror="this.style.visibility='hidden'">` : ''}<span class="profile-tag-name">${escapeHtml(profile.equippedTeamTagName)}</span><span class="profile-tag-text">realfan ${escapeHtml(profile.equippedTeamTagName)}</span></span>`
+      : '';
     const total = profile.totalPredictions || 0;
     const correct = profile.correctPredictions || 0;
     const acc = total ? Math.round((correct / total) * 100) + '%' : '—';
@@ -1778,7 +1910,7 @@ async function openPublicProfile(uid) {
         </div>
         <div class="profile-info">
           <h3 class="profile-name">${escapeHtml(profile.displayName || 'ไม่ทราบชื่อ')}</h3>
-          ${tag ? `<span class="profile-tag-badge ${tag.css}"><span class="profile-tag-name">${tag.name}</span><span class="profile-tag-text">${tag.text}</span></span>` : ''}
+          ${tag ? `<span class="profile-tag-badge ${tag.css}"><span class="profile-tag-name">${tag.name}</span><span class="profile-tag-text">${tag.text}</span></span>` : teamTagBadgeHtml}
           <p class="profile-points">${profile.points || 0} PT</p>
           <div class="profile-stats">
             <div><span>${total}</span><label>ทายทั้งหมด</label></div>
