@@ -144,6 +144,12 @@ const TAG_CATALOG = [
   { id: 'tag_fullsense', name: 'Fullsense', text: 'realfan full sense', css: 'tag-fullsense' },
 ];
 
+// ---- Team fan tags ("realfan [ชื่อทีม]") ----
+// ต่างจาก TAG_CATALOG ด้านบน: แท็กพวกนี้ "ซื้อได้ด้วยแต้ม" จากหน้าร้านในแท็บโปรไฟล์
+// รายชื่อทีม+โลโก้ไม่ได้ hardcode ไว้ตรงนี้ เพราะดึงแบบไดนามิกจาก /rankings ของ vlrggapi อยู่แล้ว
+// (ดูฟังก์ชัน buildLogoMap + renderTeamTagShop ใน app.js) เพื่อให้ครอบคลุมทุกทีมทุกภูมิภาคโดยไม่ต้องคอยอัปเดตลิสต์เอง
+const TEAM_TAG_PRICE = 10000; // แต้มต่อ 1 ทีม ซื้อได้หลายทีม สวมใส่ได้ทีละ 1 อัน (เหมือนเฟรม)
+
 // ---- Redeemable codes ----
 // ผู้เล่นกรอกโค้ดในหน้าโปรไฟล์เพื่อรับรางวัล ตรวจแบบไม่สนตัวพิมพ์เล็ก/ใหญ่ (เก็บ key เป็นตัวพิมพ์เล็กทั้งหมด)
 // แต่ละโค้ดใช้ได้ครั้งเดียวต่อบัญชี (เช็คผ่าน state.data.redeemedCodes)
