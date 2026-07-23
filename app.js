@@ -1,4 +1,62 @@
 /* ============================================================
+   ดีบักบนหน้าจอ (สำหรับดูตอนเปิดจากมือถือ/iPad ที่ไม่มี DevTools ให้เปิด)
+   กดปุ่ม 🐞 มุมขวาล่าง เพื่อดู log/error ทั้งหมด + สถานะ Firebase แบบสด
+   ลบ block นี้ทิ้งได้ทีหลังตอนดีบักเสร็จแล้ว ไม่กระทบการทำงานของเว็บส่วนอื่น
+   ============================================================ */
+(function setupOnScreenDebugConsole() {
+  const logs = [];
+  function push(level, args) {
+    const text = args.map(a => {
+      try { return typeof a === 'string' ? a : JSON.stringify(a); }
+      catch (e) { return String(a); }
+    }).join(' ');
+    logs.push({ level, text, t: new Date().toLocaleTimeString('th-TH') });
+    if (logs.length > 200) logs.shift();
+    renderIfOpen();
+  }
+  ['log', 'warn', 'error'].forEach(level => {
+    const orig = console[level].bind(console);
+    console[level] = (...args) => { orig(...args); push(level, args); };
+  });
+  window.addEventListener('error', e => push('error', [`Uncaught: ${e.message} (${e.filename}:${e.lineno})`]));
+  window.addEventListener('unhandledrejection', e => push('error', [`Unhandled promise rejection: ${e.reason}`]));
+
+  let panel, btn, open = false;
+  function build() {
+    btn = document.createElement('button');
+    btn.textContent = '🐞';
+    btn.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:99999;width:44px;height:44px;border-radius:50%;background:#ff3b4e;color:#fff;border:none;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+    btn.onclick = () => { open = !open; panel.style.display = open ? 'block' : 'none'; if (open) renderNow(); };
+    document.body.appendChild(btn);
+
+    panel = document.createElement('div');
+    panel.style.cssText = 'display:none;position:fixed;inset:60px 10px 70px 10px;z-index:99998;background:#0b0d10;color:#c9d1d9;border:1px solid #333;border-radius:6px;overflow:auto;font:11px/1.5 monospace;padding:10px;';
+    document.body.appendChild(panel);
+  }
+  function statusLine() {
+    return `--- สถานะ ---\nwindow.fb: ${window.fb ? 'พร้อมใช้งาน ✅' : 'ยังไม่มี (firebase-init.js ยังไม่โหลด) ❌'}\n` +
+      `window.fbReady: ${window.fbReady ? 'มี ✅' : 'ยังไม่มี ❌'}\n` +
+      `state.user: ${(typeof state !== 'undefined' && state.user) ? state.user.email : 'ยังไม่ล็อกอิน'}\n` +
+      `state.fbUid: ${(typeof state !== 'undefined' && state.fbUid) ? state.fbUid : 'ยังไม่มี (Firebase Auth ยังไม่เชื่อมสำเร็จ) ❌'}`;
+  }
+  function renderNow() {
+    if (!panel) return;
+    const rows = logs.map(l => `<div style="color:${l.level === 'error' ? '#ff6b6b' : l.level === 'warn' ? '#e8b93b' : '#8b949e'}">[${l.t}] ${escapeForPanel(l.text)}</div>`).join('');
+    panel.innerHTML = `<pre style="white-space:pre-wrap;color:#4de896;margin:0 0 10px">${escapeForPanel(statusLine())}</pre><div>${rows || '(ยังไม่มี log)'}</div>`;
+    panel.scrollTop = panel.scrollHeight;
+  }
+  function renderIfOpen() { if (open) renderNow(); }
+  function escapeForPanel(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', build);
+  } else {
+    build();
+  }
+  setInterval(renderIfOpen, 1000); // อัปเดตสถานะ (state.fbUid ฯลฯ) แบบสดตลอดเวลาที่เปิดพาเนลอยู่
+})();
+
+/* ============================================================
    app.js — Valorant Prediction site
    Everything is client-side. User data lives in localStorage
    only (per-browser). Google Sign-In is used purely to show a
