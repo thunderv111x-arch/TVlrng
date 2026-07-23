@@ -1684,6 +1684,13 @@ function renderTransferLog() {
 const LEADERBOARD_SIZE = 50;
 let leaderboardUnsub = null; // unsubscribe function ของ onSnapshot ตัวปัจจุบัน กันเปิดซ้ำซ้อนหลายอัน
 
+// UID ของบัญชีแอดมิน/เทส ที่ไม่อยากให้โชว์บน leaderboard สาธารณะ
+// หา UID ได้จาก Firebase Console > Authentication > Users
+const ADMIN_UIDS = [
+  'DTHEkJRU5DTd5Q2CNFw2PUPVaPc2',
+  'tvqxSv4X45RYTOoFJEwmarkmH7A2',
+];
+
 function ensureLeaderboardSubscription() {
   if (leaderboardUnsub || !window.fb) return; // subscribe อยู่แล้ว หรือ firebase ยังไม่พร้อม
   const statusEl = document.getElementById('leaderboard-status');
@@ -1692,7 +1699,8 @@ function ensureLeaderboardSubscription() {
     LEADERBOARD_SIZE,
     (rows) => {
       if (statusEl) statusEl.textContent = '';
-      renderLeaderboardRows(rows);
+      const visibleRows = rows.filter(row => !ADMIN_UIDS.includes(row.uid));
+      renderLeaderboardRows(visibleRows);
     },
     (err) => {
       console.warn('[firebase] โหลดลีดเดอร์บอร์ดไม่สำเร็จ:', err);
