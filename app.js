@@ -243,10 +243,22 @@ function handleGoogleCredential(response) {
 // ต้องรอ sign-in Firebase สำเร็จก่อนถึงจะรู้ uid นี้ และ Firestore rules อนุญาตให้เขียนเฉพาะ
 // เอกสารที่ id ตรงกับ uid นี้เท่านั้น (ดู firestore.rules)
 
+// module script (firebase-init.js) โหลด/รันช้ากว่า classic script เล็กน้อยเสมอ โดยเฉพาะตอน
+// auto sign-in ที่ Google callback อาจยิงมาเร็วมาก ถ้า window.fbReady ยังไม่ถูกตั้งค่าตอนนั้นพอดี
+// ฟังก์ชันนี้จะ poll รอสักพัก (สูงสุด ~4 วิ) แทนที่จะยอมแพ้ทันทีแบบเดิม
+function waitForFirebaseReady(retries = 20) {
+  return new Promise((resolve, reject) => {
+    (function attempt(n) {
+      if (window.fbReady) { resolve(window.fbReady); return; }
+      if (n <= 0) { reject(new Error('firebase-init.js ยังไม่พร้อมหลังรอครบเวลาแล้ว')); return; }
+      setTimeout(() => attempt(n - 1), 200);
+    })(retries);
+  });
+}
+
 async function linkFirebaseAuth(idToken) {
-  if (!window.fbReady) { console.warn('[firebase] firebase-init.js ยังไม่พร้อม ข้าม sync รอบนี้'); return; }
   try {
-    const fb = await window.fbReady;
+    const fb = await waitForFirebaseReady();
     const user = await fb.signInWithGoogleIdToken(idToken);
     state.fbUid = user.uid;
     pushProfileToFirestore(true); // sync ทันทีรอบแรกหลังล็อกอิน ไม่ต้องรอ debounce
