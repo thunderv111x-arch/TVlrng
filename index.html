@@ -22,6 +22,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="predict" onclick="switchTab('predict')">ทายผล</button>
       <button class="tab-btn" data-tab="gacha" onclick="switchTab('gacha')">คลังไอเทม</button>
+      <button class="tab-btn" data-tab="leaderboard" onclick="switchTab('leaderboard')">อันดับ</button>
       <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">โปรไฟล์</button>
     </nav>
     <div class="auth-area">
@@ -81,6 +82,22 @@
 
       <h3 class="subsection-title">ธีมตกแต่งเว็บ</h3>
       <div id="theme-grid" class="inv-grid"></div>
+    </section>
+
+    <!-- ---- TAB: Leaderboard ---- -->
+    <section id="tab-leaderboard" class="tab-panel">
+      <h2 class="section-title">อันดับผู้เล่น</h2>
+      <p class="leaderboard-note">อันดับนี้เก็บบน Firebase (ทุกคนเห็นร่วมกัน) — เรียงตามแต้มปัจจุบัน อัปเดตแบบเรียลไทม์</p>
+      <div id="leaderboard-status" class="leaderboard-status"></div>
+      <div id="leaderboard-list" class="leaderboard-list"></div>
+    </section>
+
+    <!-- ---- PAGE: Public profile (view another player, read-only) ---- -->
+    <section id="tab-publicprofile" class="tab-panel team-info-page">
+      <button type="button" class="team-info-back-btn" onclick="closePublicProfile()">← กลับ</button>
+      <div id="public-profile-body" class="team-info-body">
+        <p class="team-info-loading">กำลังโหลดโปรไฟล์...</p>
+      </div>
     </section>
 
     <!-- ---- TAB: Profile ---- -->
@@ -174,7 +191,8 @@
   </div>
 </div>
 
+<script type="module" src="firebase-init.js?v=1"></script>
 <script src="data.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
