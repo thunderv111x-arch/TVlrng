@@ -39,7 +39,7 @@ const firebaseConfig = {
   storageBucket: "predicttvlr.firebasestorage.app",
   messagingSenderId: "524935435037",
   appId: "1:524935435037:web:94c3091763ebc1a1f647f4",
-  measurementId: "G-S8HN7J9XX9",
+  measurementId: "G-S8HN7J9XX9"
 };
 
 const app = initializeApp(firebaseConfig);
