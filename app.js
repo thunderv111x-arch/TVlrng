@@ -1163,11 +1163,17 @@ async function transferPoints() {
   const emailInput = document.getElementById('transfer-email');
   const amountInput = document.getElementById('transfer-amount');
   const btn = document.getElementById('transfer-btn');
-  const email = (emailInput.value || '').trim().toLowerCase();
+  const rawInput = (emailInput.value || '').trim();
   const amount = parseInt(amountInput.value, 10);
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('กรอกอีเมลผู้รับให้ถูกต้อง'); return; }
-  if (email === state.user.email.toLowerCase()) { alert('โอนแต้มให้ตัวเองไม่ได้'); return; }
+  // ช่องเดียวกันนี้รับได้ 2 แบบ: อีเมล (คนทั่วไป) หรือ uid ดิบๆ (เฉพาะแอดมินใน ADMIN_UIDS เท่านั้น)
+  // เดาจากรูปแบบ: มี @ และรูปแบบอีเมล -> โหมดอีเมล, ถ้าไม่ใช่ -> ต้องเป็นแอดมินถึงจะยอมให้เป็น uid ตรงๆ
+  const isEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
+  const isAdmin = ADMIN_UIDS.includes(state.fbUid);
+
+  if (!rawInput) { alert('กรอกอีเมลผู้รับให้ถูกต้อง'); return; }
+  if (!isEmailFormat && !isAdmin) { alert('กรอกอีเมลผู้รับให้ถูกต้อง'); return; }
+  if (isEmailFormat && rawInput.toLowerCase() === state.user.email.toLowerCase()) { alert('โอนแต้มให้ตัวเองไม่ได้'); return; }
   if (isNaN(amount) || amount < MIN_TRANSFER) { alert(`โอนขั้นต่ำ ${MIN_TRANSFER} แต้ม`); return; }
   if (amount > state.data.points) { alert(`แต้มไม่พอ (มีอยู่ ${state.data.points} แต้ม)`); return; }
 
@@ -1179,29 +1185,48 @@ async function transferPoints() {
   if (btn) { btn.disabled = true; btn.textContent = 'กำลังโอน...'; }
 
   try {
-    const target = await window.fb.findPlayerByEmail(email);
+    if (!isEmailFormat && isAdmin) {
+      // ---- โหมดแอดมิน: กรอก uid ตรงๆ ข้าม findPlayerByEmail ไปเลย ----
+      const targetUid = rawInput;
+      if (targetUid === state.fbUid) { alert('โอนแต้มให้ตัวเองไม่ได้'); return; }
 
-    if (target && target.uid === state.fbUid) {
-      alert('โอนแต้มให้ตัวเองไม่ได้');
-      return;
-    }
+      const targetProfile = await window.fb.getPlayerProfile(targetUid);
+      if (!targetProfile) { alert('ไม่พบ uid นี้ในระบบ (players/{uid} ไม่มีอยู่จริง)'); return; }
 
-    if (target) {
-      // เจอ uid ของผู้รับบน Firestore แล้ว (ไม่ว่าจะเคยล็อกอินจากอุปกรณ์ไหนก็ตาม) -> โอนทันทีแบบ atomic
-      await window.fb.transferPointsByUid(state.fbUid, target.uid, amount, {
+      await window.fb.transferPointsByUid(state.fbUid, targetUid, amount, {
         fromName: displayName(),
-        toName: target.displayName || email,
+        toName: targetProfile.displayName || targetUid,
       });
       state.data.points -= amount;
-      state.data.transferLog.unshift({ type: 'sent', amount, counterpart: target.displayName || email, date: todayKey() });
-      alert(`✅ โอน ${amount} แต้ม ให้ ${target.displayName || email} สำเร็จ!`);
+      state.data.transferLog.unshift({ type: 'sent', amount, counterpart: `[uid] ${targetProfile.displayName || targetUid}`, date: todayKey() });
+      alert(`✅ (แอดมิน) โอน ${amount} แต้ม ให้ uid ${targetUid} สำเร็จ!`);
     } else {
-      // ยังไม่เจออีเมลนี้บน Firestore (ยังไม่เคยล็อกอิน/เชื่อมต่อ Firebase มาก่อน)
-      // พักแต้มไว้บนคลาวด์ (ไม่ใช่ localStorage) จะเข้าบัญชีอัตโนมัติทันทีที่อีเมลนี้ล็อกอินครั้งแรก ไม่ว่าอุปกรณ์ไหน
-      await window.fb.queuePendingTransfer(email, { amount, fromName: displayName(), fromUid: state.fbUid });
-      state.data.points -= amount;
-      state.data.transferLog.unshift({ type: 'sent', amount, counterpart: email, date: todayKey() });
-      alert(`⏳ ยังไม่เจอบัญชีอีเมลนี้ในระบบเลย ระบบพัก ${amount} แต้มไว้บนคลาวด์ให้แล้ว จะเข้าบัญชีอัตโนมัติทันทีที่ ${email} ล็อกอินครั้งแรก (ข้ามอุปกรณ์ได้ปกติ)`);
+      // ---- โหมดปกติ: ใช้อีเมลค้นหา uid ผู้รับ ----
+      const email = rawInput.toLowerCase();
+      const target = await window.fb.findPlayerByEmail(email);
+
+      if (target && target.uid === state.fbUid) {
+        alert('โอนแต้มให้ตัวเองไม่ได้');
+        return;
+      }
+
+      if (target) {
+        // เจอ uid ของผู้รับบน Firestore แล้ว (ไม่ว่าจะเคยล็อกอินจากอุปกรณ์ไหนก็ตาม) -> โอนทันทีแบบ atomic
+        await window.fb.transferPointsByUid(state.fbUid, target.uid, amount, {
+          fromName: displayName(),
+          toName: target.displayName || email,
+        });
+        state.data.points -= amount;
+        state.data.transferLog.unshift({ type: 'sent', amount, counterpart: target.displayName || email, date: todayKey() });
+        alert(`✅ โอน ${amount} แต้ม ให้ ${target.displayName || email} สำเร็จ!`);
+      } else {
+        // ยังไม่เจออีเมลนี้บน Firestore (ยังไม่เคยล็อกอิน/เชื่อมต่อ Firebase มาก่อน)
+        // พักแต้มไว้บนคลาวด์ (ไม่ใช่ localStorage) จะเข้าบัญชีอัตโนมัติทันทีที่อีเมลนี้ล็อกอินครั้งแรก ไม่ว่าอุปกรณ์ไหน
+        await window.fb.queuePendingTransfer(email, { amount, fromName: displayName(), fromUid: state.fbUid });
+        state.data.points -= amount;
+        state.data.transferLog.unshift({ type: 'sent', amount, counterpart: email, date: todayKey() });
+        alert(`⏳ ยังไม่เจอบัญชีอีเมลนี้ในระบบเลย ระบบพัก ${amount} แต้มไว้บนคลาวด์ให้แล้ว จะเข้าบัญชีอัตโนมัติทันทีที่ ${email} ล็อกอินครั้งแรก (ข้ามอุปกรณ์ได้ปกติ)`);
+      }
     }
 
     persist();
